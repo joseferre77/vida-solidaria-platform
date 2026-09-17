@@ -17,7 +17,8 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "prisma:generate": "pnpm --filter @vida-solidaria/api prisma:generate",
-    "prisma:migrate": "pnpm --filter @vida-solidaria/api prisma:migrate"
+    "prisma:migrate": "pnpm --filter @vida-solidaria/api prisma:migrate",
+    "build:hostinger": "pnpm --filter @vida-solidaria/web run build:hostinger"
   },
   "devDependencies": {
     "prettier": "^3.3.3",
