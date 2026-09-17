@@ -186,3 +186,45 @@ poder probarlo de verdad.
 - [Connecting a Supabase database to a Hostinger Node.js application](https://www.hostinger.com/support/connecting-a-supabase-database-to-a-hostinger-node-js-application/)
 - [Environment Variables (Node.js)](https://docs.hostinger.com/node.js/environment-variables)
 - [FTP & SSH Access](https://docs.hostinger.com/websites/ftp-ssh)
+
+## Actualización real (post-intento): el asistente de hPanel no alcanza, hace falta SSH
+
+Lo de arriba es la teoría según la documentación oficial de Hostinger. En la
+práctica, desplegando `vida-solidaria-web` nos encontramos con esto:
+
+1. El selector de **"Comando de compilación"** del asistente de hPanel **no
+   se aplica de verdad** — sin importar qué elijas ahí, Hostinger siempre
+   corre el script `build` a secas (confirmado mirando
+   `hbuilds/versions/<id>/.metadata.json`: `"build_script":"build"` fijo).
+2. Con `output: "standalone"` en `next.config.mjs` (necesario — sin esto
+   Next no genera nada ejecutable, solo queda un build estático sin server),
+   Hostinger sí arma el `server.js` correcto de Next.js dentro de
+   `hbuilds/current/nodejs/server.js`... **pero nunca copia el
+   `node_modules` que ese server.js necesita** (`require('next')` falla:
+   `Cannot find module 'next'`). Esto pasó igual probando distintos
+   "Directorio de salida" — es un bug/omisión del lado de Hostinger, no de
+   nuestra config.
+
+**Arreglo que funcionó (con acceso SSH, que este plan sí tiene):**
+
+```bash
+ssh -p 65002 <usuario>@<ip>   # datos en hPanel → Avanzado → Acceso SSH
+cd domains/gestion.vidasolidariamdp.com/hbuilds/current/nodejs
+/opt/alt/alt-nodejs20/root/usr/bin/npm install --omit=dev
+touch tmp/restart.txt   # Passenger relee la app en el próximo request
+```
+
+**Importante — esto hay que repetirlo después de CADA deploy nuevo**, porque
+cada push crea una carpeta de versión nueva bajo `hbuilds/versions/<id>/` sin
+`node_modules`, y `hbuilds/current` apunta a la última. Por ahora lo hacemos
+a mano por SSH después de cada push a `apps/web` (Claude lo hace como parte
+del deploy, no hace falta que Josecito lo recuerde). Si esto se vuelve
+tedioso, la alternativa es armar un cronjob simple en el servidor que revise
+`hbuilds/current/nodejs/node_modules` y lo instale solo si falta — pendiente
+de evaluar si vale la pena.
+
+**Necesario en `next.config.mjs`**: `output: "standalone"` (ya está en el
+repo). **Necesario en el `package.json` raíz y de cada app**: campo
+`"packageManager"` explícito (ya está) — sin esto, el selector de pnpm de
+Hostinger intenta bajar una versión de pnpm que no tiene cacheada y rompe el
+install; con `npm` como gestor de paquetes no pasa esto.
