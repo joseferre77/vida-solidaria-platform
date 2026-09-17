@@ -156,7 +156,7 @@ poder probarlo de verdad.
 
 ## Checklist antes de dar por cerrado el Módulo 1
 
-- [ ] Repo en GitHub (distinto al de RedVivo) con el código pusheado
+- [x] Repo en GitHub (distinto al de RedVivo) con el código pusheado — https://github.com/joseferre77/vida-solidaria-platform
 - [ ] Proyecto Supabase creado + extensión PostGIS activada
 - [ ] Las dos Node.js Apps creadas en hPanel (o resuelto Opción A vs B del
       monorepo)
