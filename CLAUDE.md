@@ -64,6 +64,8 @@ casos. Detalle completo en `ARCHITECTURE.md` §1.
       documentación — `DEPLOY.md` da dos caminos (probar con el monorepo, o
       separar `apps/api`/`apps/web` en dos repos si no anda).
 - [x] **Repo en GitHub**: https://github.com/joseferre77/vida-solidaria-platform (pusheado desde la compu de Josecito vía el bridge de dispositivo, con una deploy key propia del repo — sin tokens/contraseñas manejados por Claude).
+- [x] **`vida-solidaria-web` (frontend) desplegado y funcionando** en https://gestion.vidasolidariamdp.com — el asistente de hPanel de Hostinger tiene un bug real (no aplica el comando de compilación elegido, y no copia `node_modules` junto al server.js standalone de Next.js); se resolvió con acceso SSH (que este plan sí tiene, a diferencia de lo que se asumía). Detalle completo y el arreglo exacto en `DEPLOY.md` ("Actualización real"). Falta repetir el arreglo de node_modules después de cada deploy nuevo hasta que se automatice.
+- [ ] `vida-solidaria-api` (backend) todavía no se desplegó — es el siguiente paso, ahora con el atajo SSH ya probado.
 - [ ] Nada de Módulo 2 en adelante todavía (Proyectos, Casos, Logística,
       Campo, Finanzas, Analítica).
 
