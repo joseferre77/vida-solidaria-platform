@@ -1,0 +1,6 @@
+{
+  "name": "@vida-solidaria/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Configuración compartida (tsconfig base, eslint base) para todo el monorepo. Placeholder — se completa junto con el Módulo 1."
+}

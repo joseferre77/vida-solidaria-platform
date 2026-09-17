@@ -1,0 +1,29 @@
+{
+  "name": "vida-solidaria-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plataforma de gestión integral de Vida Solidaria MDP — voluntariado, proyectos, casos, logística, operaciones de campo y finanzas.",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "pnpm --filter @vida-solidaria/api dev",
+    "dev:web": "pnpm --filter @vida-solidaria/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "prisma:generate": "pnpm --filter @vida-solidaria/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @vida-solidaria/api prisma:migrate"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "eslint": "^9.14.0",
+    "typescript": "^5.6.3",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10"
+  }
+}

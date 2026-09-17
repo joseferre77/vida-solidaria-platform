@@ -1,0 +1,665 @@
+// ============================================================
+// Vida Solidaria — Plataforma de Gestión
+// Prisma schema — versión ejecutable del modelo descrito en ARCHITECTURE.md
+// Estado: modelo de datos inicial (Fase de diseño). Sin lógica de negocio
+// todavía — eso llega con el Módulo 1 (Core & Seguridad).
+// ============================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ────────────────────────────────────────────────
+// 1. CORE & SEGURIDAD (RBAC)
+// ────────────────────────────────────────────────
+
+enum UserStatus {
+  active
+  suspended
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?  @map("password_hash")
+  googleId     String?  @unique @map("google_id")
+  name         String
+  phone        String?
+  avatarUrl    String?  @map("avatar_url")
+  status       UserStatus @default(active)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  roles             UserRole[]
+  refreshTokens     RefreshToken[]
+  projectMembership ProjectMember[]
+  auditEntries      AuditLog[]         @relation("audit_actor")
+
+  @@map("users")
+}
+
+model Role {
+  id          String @id @default(uuid())
+  slug        String @unique // admin_general, direccion_general, direccion_proyectos,
+                              // coordinacion_logistica, coordinacion_comercial,
+                              // coordinacion_recepcion, coordinacion_extraccion,
+                              // coordinador_relevamiento, voluntario
+  label       String
+  rank        Int    // menor = más alcance
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId String @map("user_id")
+  roleId String @map("role_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Permission {
+  id    String @id @default(uuid())
+  slug  String @unique // cases.write, finance.read, projects.admin, ...
+  label String
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  tokenHash  String    @map("token_hash")
+  userAgent  String?   @map("user_agent")
+  ip         String?
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  action     String
+  diff       Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation("audit_actor", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@map("audit_log")
+}
+
+// ────────────────────────────────────────────────
+// 2. GESTIÓN DE PROYECTOS
+// ────────────────────────────────────────────────
+
+enum ProjectStatus {
+  planning
+  active
+  paused
+  done
+}
+
+enum ProjectRole {
+  creador
+  editor
+  visor
+  admin
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  name        String
+  description String?
+  area        String?
+  status      ProjectStatus @default(planning)
+  ownerId     String        @map("owner_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  members          ProjectMember[]
+  boards           Board[]
+  fundTransactions FundTransaction[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  projectId   String      @map("project_id")
+  userId      String      @map("user_id")
+  projectRole ProjectRole @map("project_role")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@map("project_members")
+}
+
+model Board {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  columns BoardColumn[]
+
+  @@map("boards")
+}
+
+model BoardColumn {
+  id        String @id @default(uuid())
+  boardId   String @map("board_id")
+  name      String
+  sortOrder Int    @default(0) @map("sort_order")
+
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  tasks Task[]
+
+  @@map("board_columns")
+}
+
+enum TaskPriority {
+  baja
+  media
+  alta
+}
+
+model Task {
+  id            String       @id @default(uuid())
+  boardColumnId String       @map("board_column_id")
+  title         String
+  description   String?
+  priority      TaskPriority @default(media)
+  dueDate       DateTime?    @map("due_date")
+  createdBy     String       @map("created_by")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  boardColumn BoardColumn      @relation(fields: [boardColumnId], references: [id], onDelete: Cascade)
+  assignees   TaskAssignee[]
+  comments    TaskComment[]
+  attachments TaskAttachment[]
+
+  @@map("tasks")
+}
+
+model TaskAssignee {
+  taskId String @map("task_id")
+  userId String @map("user_id")
+
+  @@id([taskId, userId])
+  @@map("task_assignees")
+  Task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model TaskComment {
+  id        String   @id @default(uuid())
+  taskId    String   @map("task_id")
+  userId    String   @map("user_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_comments")
+}
+
+model TaskAttachment {
+  id         String   @id @default(uuid())
+  taskId     String   @map("task_id")
+  fileUrl    String   @map("file_url")
+  uploadedBy String   @map("uploaded_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_attachments")
+}
+
+// ────────────────────────────────────────────────
+// 3. CRM SOCIAL — MÓDULO "CASOS"
+// ────────────────────────────────────────────────
+
+enum CaseStatus {
+  activo
+  en_seguimiento
+  derivado
+  cerrado
+}
+
+enum NeedCategory {
+  salud
+  documentacion
+  abrigo
+  alimentacion
+  vivienda
+  laboral
+  otro
+}
+
+enum NeedUrgency {
+  inmediata
+  urgente
+  normal
+}
+
+model Case {
+  id              String     @id @default(uuid())
+  caseNumber      String     @unique @map("case_number") // ej. C000123, vía next_case_number()
+  fullName        String     @map("full_name")
+  alias           String?
+  approxAge       Int?       @map("approx_age")
+  mainPhotoUrl    String?    @map("main_photo_url")
+  healthStatus    String?    @map("health_status")
+  currentSleepSpot String?   @map("current_sleep_spot")
+  status          CaseStatus @default(activo)
+  createdBy       String     @map("created_by")
+  updatedBy       String?    @map("updated_by")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  contactsHistory CaseContactHistory[]
+  locations       CaseLocation[]
+  photos          CasePhoto[]
+  skills          CaseSkill[]
+  needs           CaseNeed[]
+  statusHistory   CaseStatusHistory[]
+  checkins        Checkin[]
+
+  @@map("cases")
+}
+
+model CaseContactHistory {
+  id            String   @id @default(uuid())
+  caseId        String   @map("case_id")
+  userId        String   @map("user_id")
+  notes         String
+  moodObserved  String?  @map("mood_observed")
+  contactedAt   DateTime @default(now()) @map("contacted_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("case_contacts_history")
+}
+
+model CaseLocation {
+  id         String   @id @default(uuid())
+  caseId     String   @map("case_id")
+  lat        Float
+  lng        Float
+  recordedBy String   @map("recorded_by")
+  recordedAt DateTime @default(now()) @map("recorded_at")
+  // Nota: en la migración SQL real este par lat/lng se acompaña de una
+  // columna `geog geography(Point,4326)` generada, para poder indexar con
+  // GiST y hacer consultas de proximidad ("casos relevados a <500m").
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("case_locations")
+}
+
+model CasePhoto {
+  id         String   @id @default(uuid())
+  caseId     String   @map("case_id")
+  url        String
+  uploadedBy String   @map("uploaded_by")
+  takenAt    DateTime @default(now()) @map("taken_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("case_photos")
+}
+
+model CaseSkill {
+  id        String  @id @default(uuid())
+  caseId    String  @map("case_id")
+  skillLabel String @map("skill_label")
+  level     String?
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("case_skills")
+}
+
+model CaseNeed {
+  id         String       @id @default(uuid())
+  caseId     String       @map("case_id")
+  category   NeedCategory
+  urgency    NeedUrgency
+  notes      String?
+  resolvedAt DateTime?    @map("resolved_at")
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("case_needs")
+}
+
+model CaseStatusHistory {
+  id        String     @id @default(uuid())
+  caseId    String     @map("case_id")
+  fromStatus CaseStatus? @map("from_status")
+  toStatus  CaseStatus @map("to_status")
+  changedBy String     @map("changed_by")
+  changedAt DateTime   @default(now()) @map("changed_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("case_status_history")
+}
+
+// ────────────────────────────────────────────────
+// 4. LOGÍSTICA, INVENTARIO Y STOCK
+// ────────────────────────────────────────────────
+
+model DonorInKind {
+  id      String  @id @default(uuid())
+  name    String
+  contact String?
+  type    String  // individuo | empresa
+
+  intakes DonationIntake[]
+
+  @@map("donors_in_kind")
+}
+
+model DonationIntake {
+  id               String   @id @default(uuid())
+  donorId          String?  @map("donor_id")
+  receivedBy       String   @map("received_by") // recolector
+  itemDescription  String   @map("item_description")
+  quantity         Decimal
+  unit             String
+  destinationNote  String?  @map("destination_note")
+  receivedAt       DateTime @default(now()) @map("received_at")
+
+  donor DonorInKind? @relation(fields: [donorId], references: [id], onDelete: SetNull)
+
+  @@map("donation_intakes")
+}
+
+model StockItem {
+  id            String  @id @default(uuid())
+  name          String
+  unit          String
+  category      String?
+  minStockAlert Decimal? @map("min_stock_alert")
+
+  movements   StockMovement[]
+  kitchenUses KitchenBatchIngredient[]
+
+  @@map("stock_items")
+}
+
+enum MovementType {
+  ingreso
+  egreso
+}
+
+model StockMovement {
+  id               String       @id @default(uuid())
+  stockItemId      String       @map("stock_item_id")
+  type             MovementType
+  quantity         Decimal
+  reason           String?
+  relatedEntityType String?     @map("related_entity_type") // "kitchen_batch" | "field_delivery" | ...
+  relatedEntityId  String?      @map("related_entity_id")
+  createdBy        String       @map("created_by")
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  stockItem StockItem @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+
+  @@index([stockItemId])
+  @@map("stock_movements")
+}
+
+enum KitchenBatchStatus {
+  preparacion
+  coccion
+  listo_transporte
+  entregado
+}
+
+model KitchenBatch {
+  id             String             @id @default(uuid())
+  name           String
+  targetServings Int                @map("target_servings")
+  status         KitchenBatchStatus @default(preparacion)
+  createdBy      String             @map("created_by")
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  ingredients   KitchenBatchIngredient[]
+  assignees     KitchenBatchAssignee[]
+  statusHistory KitchenBatchStatusHistory[]
+  checkins      Checkin[]
+
+  @@map("kitchen_batches")
+}
+
+model KitchenBatchIngredient {
+  batchId         String  @map("batch_id")
+  stockItemId     String  @map("stock_item_id")
+  quantityAssigned Decimal @map("quantity_assigned")
+
+  batch     KitchenBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  stockItem StockItem    @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+
+  @@id([batchId, stockItemId])
+  @@map("kitchen_batch_ingredients")
+}
+
+model KitchenBatchAssignee {
+  batchId   String  @map("batch_id")
+  userId    String  @map("user_id")
+  taskLabel String? @map("task_label")
+
+  batch KitchenBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@id([batchId, userId])
+  @@map("kitchen_batch_assignees")
+}
+
+model KitchenBatchStatusHistory {
+  id        String             @id @default(uuid())
+  batchId   String             @map("batch_id")
+  toStatus  KitchenBatchStatus @map("to_status")
+  changedBy String             @map("changed_by")
+  changedAt DateTime           @default(now()) @map("changed_at")
+
+  batch KitchenBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@map("kitchen_batch_status_history")
+}
+
+// ────────────────────────────────────────────────
+// 5. OPERACIONES DE CAMPO (TIEMPO REAL)
+// ────────────────────────────────────────────────
+
+model FieldTeam {
+  id           String @id @default(uuid())
+  name         String
+  vehicleLabel String? @map("vehicle_label")
+
+  members         FieldTeamMember[]
+  zoneAssignments ZoneAssignment[]
+  checkins        Checkin[]
+
+  @@map("field_teams")
+}
+
+model FieldTeamMember {
+  teamId String @map("team_id")
+  userId String @map("user_id")
+
+  team FieldTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@map("field_team_members")
+}
+
+model Zone {
+  id      String  @id @default(uuid())
+  name    String
+  // El polígono real se define en la migración SQL como
+  // `geography(Polygon,4326)`; acá se referencia solo el id/nombre.
+
+  assignments ZoneAssignment[]
+
+  @@map("zones")
+}
+
+model ZoneAssignment {
+  id            String   @id @default(uuid())
+  zoneId        String   @map("zone_id")
+  teamId        String   @map("team_id")
+  weekStartDate DateTime @map("week_start_date")
+  weekEndDate   DateTime @map("week_end_date")
+
+  zone Zone      @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  team FieldTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@map("zone_assignments")
+}
+
+enum CheckinType {
+  en_camino
+  llegamos
+  entregando_viandas
+  relevando_caso
+}
+
+model Checkin {
+  id             String      @id @default(uuid())
+  userId         String      @map("user_id")
+  teamId         String?     @map("team_id")
+  type           CheckinType
+  caseId         String?     @map("case_id")
+  kitchenBatchId String?     @map("kitchen_batch_id")
+  lat            Float
+  lng            Float
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  team         FieldTeam?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  case         Case?         @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  kitchenBatch KitchenBatch? @relation(fields: [kitchenBatchId], references: [id], onDelete: SetNull)
+  deliveries   FieldDelivery[]
+
+  @@map("checkins")
+}
+
+model FieldDelivery {
+  id        String  @id @default(uuid())
+  checkinId String  @map("checkin_id")
+  itemLabel String  @map("item_label")
+  quantity  Decimal
+
+  checkin Checkin @relation(fields: [checkinId], references: [id], onDelete: Cascade)
+
+  @@map("field_deliveries")
+}
+
+// ────────────────────────────────────────────────
+// 6. FINANZAS Y DONACIONES
+// ────────────────────────────────────────────────
+
+model Lead {
+  id                String   @id @default(uuid())
+  type              String   // donante | empresa | voluntario
+  name              String
+  email             String?
+  phone             String?
+  source            String?  // formulario web, campaña, etc.
+  payload           Json?
+  convertedToUserId String?  @map("converted_to_user_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@map("leads")
+}
+
+model DonorMonetary {
+  id        String  @id @default(uuid())
+  name      String
+  email     String?
+  phone     String?
+  isCompany Boolean @default(false) @map("is_company")
+
+  transactions FundTransaction[]
+
+  @@map("donors_monetary")
+}
+
+enum FundTransactionType {
+  ingreso
+  egreso
+}
+
+enum FundMethod {
+  transferencia
+  efectivo
+}
+
+model FundTransaction {
+  id                  String               @id @default(uuid())
+  type                FundTransactionType
+  method              FundMethod
+  amount              Decimal
+  currency            String               @default("ARS")
+  donorId             String?              @map("donor_id")
+  originNote          String?              @map("origin_note")
+  destinationProjectId String?             @map("destination_project_id")
+  executedBy          String               @map("executed_by")
+  occurredAt          DateTime             @default(now()) @map("occurred_at")
+
+  donor             DonorMonetary? @relation(fields: [donorId], references: [id], onDelete: SetNull)
+  destinationProject Project?      @relation(fields: [destinationProjectId], references: [id], onDelete: SetNull)
+
+  @@map("fund_transactions")
+}
+
+model FinancialReport {
+  id          String   @id @default(uuid())
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+  totals      Json
+  generatedBy String   @map("generated_by")
+  generatedAt DateTime @default(now()) @map("generated_at")
+  publicUrl   String?  @map("public_url")
+
+  @@map("financial_reports")
+}
+
+// ────────────────────────────────────────────────
+// 7. ANALÍTICA — sin tablas propias en v1 (ver ARCHITECTURE.md §4.7)
+// ────────────────────────────────────────────────

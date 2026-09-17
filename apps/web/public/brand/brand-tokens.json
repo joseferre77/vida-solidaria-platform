@@ -1,0 +1,19 @@
+{
+  "name": "Vida Solidaria MDP",
+  "slogan": "Tu esfuerzo, nuestro motor",
+  "logo": "/brand/logo.png",
+  "colors": {
+    "purpleDeep": "#3a0a5c",
+    "purple": "#7c1fb0",
+    "magenta": "#c026d3",
+    "yellow": "#ffd400",
+    "orange": "#ff8a00",
+    "navy": "#123a7a",
+    "cream": "#fff8ec"
+  },
+  "fonts": {
+    "display": "'Baloo 2', sans-serif",
+    "body": "'Poppins', system-ui, sans-serif"
+  },
+  "note": "Tokens extraídos de la landing page de lanzamiento (countdown) ya entregada. No hay todavía un manual de marca formal — armar como entregable aparte si se necesita para otros materiales."
+}

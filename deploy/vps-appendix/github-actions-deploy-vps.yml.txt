@@ -1,0 +1,49 @@
+name: Deploy a Hostinger
+
+# Corre en cada push a main. La conexión SSH la hace el runner de GitHub,
+# NUNCA un asistente de IA ni nadie fuera de tu cuenta de GitHub: las
+# credenciales viven solo en Settings → Secrets and variables → Actions
+# de este repo, cifradas por GitHub.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vida-solidaria/api exec tsc --noEmit
+      - run: pnpm --filter @vida-solidaria/web build
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_SOCKET_URL: ${{ vars.NEXT_PUBLIC_SOCKET_URL }}
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy por SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOSTINGER_HOST }}
+          username: ${{ secrets.HOSTINGER_USER }}
+          key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/vida-solidaria
+            git pull origin main
+            pnpm install --frozen-lockfile
+            pnpm --filter @vida-solidaria/api exec prisma migrate deploy
+            pnpm --filter @vida-solidaria/api exec prisma generate
+            pnpm --filter @vida-solidaria/api build
+            pnpm --filter @vida-solidaria/web build
+            pm2 reload ecosystem.config.js

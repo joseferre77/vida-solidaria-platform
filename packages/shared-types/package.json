@@ -1,0 +1,8 @@
+{
+  "name": "@vida-solidaria/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tipos TypeScript compartidos entre apps/api y apps/web (roles, enums de estado, contratos de API).",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}
