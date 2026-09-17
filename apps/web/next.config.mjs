@@ -6,6 +6,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // "standalone": empaqueta un server.js propio + node_modules mínimos.
+  // Lo necesitan plataformas como Hostinger (Node.js Apps) que arman su
+  // propio proceso de arranque a partir de la carpeta de build en vez de
+  // correr "next start" directo.
+  output: "standalone",
 }
 
 export default nextConfig
