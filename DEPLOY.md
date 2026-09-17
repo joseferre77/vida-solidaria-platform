@@ -24,51 +24,53 @@ que armé antes para VPS (Nginx, PM2, un script de setup de servidor) **no
 aplican acá** — quedan guardadas en `deploy/vps-appendix/` por si el día de
 mañana migrás a VPS, pero ignoralas por ahora.
 
-## Paso 0 — Repo en GitHub
+## Paso 0 — Repo en GitHub ✅ hecho
 
-Igual que antes: no puedo pushear yo (este entorno tiene bloqueado el acceso
-directo a GitHub), así que lo hacés vos con el contenido del ZIP:
+Ya está resuelto — el código vive en
+[github.com/joseferre77/vida-solidaria-platform](https://github.com/joseferre77/vida-solidaria-platform),
+rama `main`. Cada milestone nuevo se pushea ahí directo.
 
-```bash
-cd vida-solidaria-platform
-git init
-git add .
-git commit -m "Milestone 1: Core & Seguridad (auth + RBAC)"
-git branch -M main
-git remote add origin https://github.com/joseferre77/<TU_REPO_NUEVO>.git
-git push -u origin main
-```
+## Paso 1 — Crear el proyecto en Supabase (todavía sin conectar a nada)
 
-Usá un repo **distinto** al de RedVivo.
-
-## Paso 1 — Base de datos: conectar Supabase
-
-1. En Supabase (supabase.com), creá un proyecto nuevo y gratis (el free tier
-   alcanza de sobra para arrancar).
-2. Cuando tengas la Node.js App creada en Hostinger (Paso 2), andá a su panel
-   → sección **Essentials → Database → Connect** → elegí **Supabase** →
-   autorizá tu cuenta → conectá el proyecto. Hostinger trae automáticamente
-   las variables de conexión y las aplica en el próximo deploy — no hace
-   falta que copies vos ningún connection string a mano.
-3. Activá la extensión PostGIS en ese proyecto de Supabase: en su SQL Editor,
-   corré `CREATE EXTENSION IF NOT EXISTS postgis;` una sola vez.
+1. En [supabase.com](https://supabase.com), creá una cuenta/proyecto nuevo y
+   gratis (el free tier alcanza de sobra para arrancar). Elegí una región
+   cercana (por ejemplo São Paulo).
+2. No hace falta copiar ningún connection string a mano todavía — eso lo va
+   a hacer Hostinger automáticamente en el Paso 3, una vez que exista la
+   Node.js App.
+3. Activá la extensión PostGIS: en el **SQL Editor** de ese proyecto, corré
+   una sola vez `CREATE EXTENSION IF NOT EXISTS postgis;`.
 
 ## Paso 2 — Crear la(s) Node.js App(s) en hPanel
 
-Hostinger permite conectar por GitHub (recomendado — deploy automático en
-cada push), por archivo comprimido, o con la extensión de VS Code. Vamos con
-GitHub.
+**Importante — esto es lo que te faltaba y por eso no veías el botón de
+conectar la base de datos**: ese botón no está en ningún menú general de
+hPanel, aparece *adentro* del panel de una Node.js App que ya existe. Hay
+que crear la app primero.
+
+Navegación exacta en hPanel:
+
+1. **Websites → Add Website**.
+2. Elegí el tipo **Node.js web app** (no sitio estático, no WordPress).
+3. Como fuente del código elegí **Import from GitHub** (ya no hace falta
+   subir ningún zip — el repo ya está pusheado).
+4. Autorizá a Hostinger a acceder a tu cuenta de GitHub si te lo pide, y
+   seleccioná el repo `joseferre77/vida-solidaria-platform`, rama `main`.
+5. Hostinger va a autodetectar framework/comandos — revisalos y ajustalos
+   como corresponde (detalle abajo). Version de Node: **20** (o 22, el
+   proyecto anda con ambas).
+6. Click en **Deploy**.
 
 Necesitás **dos** Node.js Apps (backend y frontend son dos procesos
-separados):
+separados) — repetí este flujo dos veces:
 
 - **`vida-solidaria-api`** → subdominio `api.TU_DOMINIO`
 - **`vida-solidaria-web`** → subdominio `app.TU_DOMINIO`
 
-**Sobre el monorepo**: no encontré confirmación oficial de que Hostinger
-permita apuntar la Node.js App a una *subcarpeta* de un repo (`apps/api`,
-`apps/web`) cuando conectás por GitHub — la documentación no lo aclara. Dos
-caminos, de más a menos cómodo:
+**Sobre el monorepo**: no encontré confirmación oficial de que al importar
+por GitHub, Hostinger permita apuntar la Node.js App a una *subcarpeta* del
+repo (`apps/api`, `apps/web`) en vez de a la raíz. Dos caminos, de más a
+menos cómodo:
 
 - **Opción A (probar primero)**: conectá el mismo repo monorepo en las dos
   apps, y en cada una configurá manualmente:
@@ -76,7 +78,7 @@ caminos, de más a menos cómodo:
     command** `pnpm --filter @vida-solidaria/api exec prisma generate && pnpm --filter @vida-solidaria/api exec prisma migrate deploy && pnpm --filter @vida-solidaria/api exec tsx prisma/seed.ts && pnpm --filter @vida-solidaria/api build`,
     **Entry file / start** `apps/api/dist/server.js`. (El paso del seed
     depende de que ya hayas definido `ADMIN_PASSWORD` en las variables de
-    entorno del Paso 3 — si preferís correrlo aparte más controladamente,
+    entorno del Paso 4 — si preferís correrlo aparte más controladamente,
     sacalo de acá y mirá la sección "El usuario Admin maestro" más abajo.)
   - `vida-solidaria-web`: **Build command**
     `pnpm --filter @vida-solidaria/web build`, **Start command**
@@ -89,14 +91,23 @@ caminos, de más a menos cómodo:
   uno a su Node.js App normalmente. Es más manual de mantener en paralelo
   pero elimina cualquier duda sobre soporte de monorepo.
 
-En ambos casos, la versión de Node.js a elegir es **20** (o 22, que viene
-por defecto — el proyecto es compatible con ambas).
-
 > Poniendo `prisma migrate deploy` dentro del **build command** de la API,
 > las migraciones de base de datos corren solas en cada deploy — no
 > necesitás una terminal para eso.
 
-## Paso 3 — Variables de entorno
+## Paso 3 — Ahora sí: conectar Supabase a `vida-solidaria-api`
+
+Con la app ya creada y deployada al menos una vez (aunque falle por no tener
+`DATABASE_URL` todavía, no importa):
+
+1. Entrá al dashboard de la Node.js App **`vida-solidaria-api`** en hPanel.
+2. Sección **Essentials → Database** → botón **Connect**.
+3. Elegí **Supabase** → te redirige a Supabase para autorizar la conexión →
+   elegís el proyecto que creaste en el Paso 1 (conectar uno existente, no
+   crear uno nuevo ahí).
+4. Hostinger completa `DATABASE_URL` solo y redeploya la app.
+
+## Paso 4 — Variables de entorno
 
 En cada Node.js App → **Environment variables** (a mano, o importando un
 `.env` con "Import .env"):
