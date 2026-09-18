@@ -308,3 +308,23 @@ dashboard) → pestaña **Session pooler**.
 - `vida-solidaria-web` → https://gestion.vidasolidariamdp.com ✅
 - `vida-solidaria-api` → https://api.vidasolidariamdp.com ✅ (Fastify + Prisma + Supabase Postgres, migración inicial aplicada, Admin General sembrado, login probado end-to-end con `curl`)
 - Supabase: proyecto `vida-solidaria-production`, organización `nuevogenfilms2025` (separada de RedVivo), región São Paulo (`sa-east-1`)
+
+
+## Importante: la "Implementación automática" redespliega con CUALQUIER push
+
+Por defecto, las dos Node.js Apps de Hostinger tienen activado el redeploy
+automático en cada push a `main` — **sin importar qué carpeta tocó el
+commit** (un cambio solo en `DEPLOY.md`/`CLAUDE.md` también dispara un
+redeploy de las dos apps). Como cada redeploy nuevo arranca de una carpeta
+`versions/<id>/` limpia (sin `node_modules`, sin `dist/`, con el `server.js`
+del repo tal cual), **pisa todos los arreglos manuales de SSH** de esta
+guía.
+
+Por eso se desactivó **"Implementación automática"** en el panel de las dos
+apps (fila de indicadores arriba del todo, junto a SSL/CDN/Malware
+protegido). Con esto desactivado, un push a GitHub actualiza el código en
+`hbuilds/last-source` pero no dispara un build/deploy solo; hay que
+apretar **"Redeploy"** a mano en el panel de la app correspondiente cuando
+haya un cambio real en `apps/api` o `apps/web`, y después repetir el fix de
+SSH (instalar `node_modules`, compilar, copiar `.env`, apuntar `server.js` a
+`dist/server.js`) — ver las secciones de arriba.
