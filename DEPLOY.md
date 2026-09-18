@@ -322,9 +322,48 @@ guía.
 
 Por eso se desactivó **"Implementación automática"** en el panel de las dos
 apps (fila de indicadores arriba del todo, junto a SSL/CDN/Malware
-protegido). Con esto desactivado, un push a GitHub actualiza el código en
-`hbuilds/last-source` pero no dispara un build/deploy solo; hay que
-apretar **"Redeploy"** a mano en el panel de la app correspondiente cuando
-haya un cambio real en `apps/api` o `apps/web`, y después repetir el fix de
-SSH (instalar `node_modules`, compilar, copiar `.env`, apuntar `server.js` a
-`dist/server.js`) — ver las secciones de arriba.
+protegido). Con esto desactivado, un push a GitHub **no actualiza nada
+solo** — ni siquiera `hbuilds/last-source` (esto se confirmó al desplegar
+el Módulo 2: después del `git push`, `last-source` seguía con el commit
+viejo hasta que se apretó "Redeploy" a mano). Hay que apretar
+**"Redeploy"** en el panel de la app correspondiente cada vez que haya un
+cambio real en `apps/api` o `apps/web`, y después repetir el fix de SSH
+(instalar `node_modules`, compilar, copiar `.env`, apuntar `server.js` a
+`dist/server.js`) — ver las secciones de arriba. El orden entre las dos
+apps no importa, son independientes.
+
+## Módulo 2 (Gestión de Proyectos): deploy y un incidente de límite de procesos
+
+Se agregaron rutas nuevas a `vida-solidaria-api`
+(`/api/projects`, `/api/tasks`, `/api/dashboard/summary`, `/api/users/basic`)
+y páginas nuevas a `vida-solidaria-web` (`/proyectos`, `/proyectos/[id]`).
+No hizo falta migración de Prisma nueva — las tablas ya existían desde el
+milestone 1, solo se agregaron relaciones que faltaban en `schema.prisma`.
+El deploy siguió el proceso ya documentado arriba (Redeploy manual en el
+panel + fix de SSH en cada app) sin sorpresas nuevas, con una excepción:
+
+**Incidente: límite de procesos (LVE/CloudLinux) agotado por un script
+colgado.** Al intentar borrar un proyecto de prueba directo en la base con
+un script de Node (`node script.js` corrido por SSH) sin exportar
+`DATABASE_URL` en el shell, Prisma se quedó intentando conectar a Postgres
+en `localhost` (que no existe) y el proceso nunca terminó — ni siquiera al
+cortarse la sesión SSH desde el lado cliente por timeout, porque el proceso
+en el servidor quedó huérfano corriendo igual. Esto agotó el límite de 120
+procesos simultáneos de la cuenta (LVE), y desde ahí **cualquier comando
+SSH nuevo fallaba con `exec request failed on channel 0`** — la
+autenticación funcionaba (la clave era válida) pero el servidor rechazaba
+ejecutar nada nuevo. No aparecía ninguna alerta visible en hPanel.
+
+Se resolvió pidiéndole al chat de soporte de Hostinger (con IA) que
+revisara el uso de procesos de la cuenta — confirmaron el límite en 120/120
+y lo ampliaron a 400 como refuerzo temporal. Con eso liberado, se pudo
+volver a entrar por SSH, matar el proceso huérfano (`ps -u <usuario> -o
+pid,etime,cmd --sort=-pcpu` para encontrarlo por tiempo corriendo, después
+`kill -9`) y terminar el deploy normalmente.
+
+**Lección para la próxima vez que haga falta un script puntual (no la app)
+contra la base por SSH:** siempre exportar `DATABASE_URL` explícitamente
+antes (`export $(grep DATABASE_URL hbuilds/config/.env)` o cargarlo con
+`require('dotenv').config()` en el script) y correrlo con `timeout <segundos>
+node script.js` para que nunca quede colgado indefinidamente si algo de red
+falla.

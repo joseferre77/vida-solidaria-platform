@@ -66,13 +66,30 @@ casos. Detalle completo en `ARCHITECTURE.md` §1.
 - [x] **Repo en GitHub**: https://github.com/joseferre77/vida-solidaria-platform (pusheado desde la compu de Josecito vía el bridge de dispositivo, con una deploy key propia del repo — sin tokens/contraseñas manejados por Claude).
 - [x] **`vida-solidaria-web` (frontend) desplegado y funcionando** en https://gestion.vidasolidariamdp.com — el asistente de hPanel de Hostinger tiene un bug real (no aplica el comando de compilación elegido, y no copia `node_modules` junto al server.js standalone de Next.js); se resolvió con acceso SSH (que este plan sí tiene, a diferencia de lo que se asumía). Detalle completo y el arreglo exacto en `DEPLOY.md` ("Actualización real"). Falta repetir el arreglo de node_modules después de cada deploy nuevo hasta que se automatice.
 - [x] **`vida-solidaria-api` (backend) desplegado y funcionando** en https://api.vidasolidariamdp.com, conectado a Supabase (Postgres) — migración inicial aplicada, roles/permisos y Admin General sembrados, login probado end-to-end (`POST /api/auth/login` devuelve 200 con el usuario real). El preset "Fastify" de Hostinger no corre ningún build de TypeScript, así que se agregó `apps/api/server.js` como puente fijo (`require('./dist/server.js')`) para no depender nunca más de tocar "Archivo de entrada" en el panel (no se puede editar sin rehacer el alta de la app). Detalle completo, incluyendo el fix de permisos de `node_modules/.bin` y por qué `DATABASE_URL` hay que armarla a mano con el Session pooler de Supabase, en `DEPLOY.md` ("Actualización real 2").
-- [ ] Nada de Módulo 2 en adelante todavía (Proyectos, Casos, Logística,
-      Campo, Finanzas, Analítica).
+- [x] **Módulo 2 — Gestión de Proyectos implementado, desplegado y
+      probado end-to-end en producción.** Backend: `projects.service.ts` +
+      `projects.routes.ts` (proyectos, tableros Kanban con columnas por
+      defecto Backlog/En curso/Bloqueado/Hecho, tareas, asignaciones,
+      comentarios) y `users.routes.ts` (endpoint mínimo `/users/basic` para
+      pickers). No hizo falta migración nueva — las tablas ya existían desde
+      `20260917001307_init`, solo faltaban relaciones de Prisma
+      (`owner`, `boards`, `members`, `assignee`/`comment.user`) que se
+      agregaron a `schema.prisma`. Frontend: `/proyectos` (listado con
+      contadores) y `/proyectos/[id]` (tablero Kanban, tareas con
+      prioridad/vencimiento/comentarios/asignados), dashboard con métricas
+      reales (`getDashboardSummary`) en vez de tarjetas estáticas,
+      `middleware.ts` protegiendo también `/proyectos`. Verificado
+      creando un proyecto real vía API (se generó su tablero y columnas
+      automáticamente) y confirmando `/api/dashboard/summary`,
+      `/api/projects`, `/api/users/basic` en producción. RBAC ya estaba
+      definido desde Milestone 1 (`projects.read/write/admin`).
+- [ ] Nada de Módulo 3 en adelante todavía (Casos, Logística, Campo,
+      Finanzas, Analítica).
 
 ## Roadmap completo (ver detalle en ARCHITECTURE.md §7)
 
-1. Core & Seguridad ✅ *implementado, ver arriba — falta Google OAuth real y desplegar*
-2. Gestión de Proyectos ⏸️ *siguiente*
+1. Core & Seguridad ✅ *implementado, ver arriba — falta Google OAuth real*
+2. Gestión de Proyectos ✅ *implementado y desplegado, ver arriba*
 3. CRM Social (Casos)
 4. Logística, Inventario y Stock
 5. Operaciones de Campo (tiempo real)
