@@ -4,6 +4,8 @@ import cookie from "@fastify/cookie"
 import { env, isProd } from "./config/env"
 import { attachUser } from "./middleware/auth.middleware"
 import { authRoutes } from "./modules/auth/auth.routes"
+import { projectsRoutes } from "./modules/projects/projects.routes"
+import { usersRoutes } from "./modules/users/users.routes"
 
 async function main() {
   const app = Fastify({
@@ -21,9 +23,11 @@ async function main() {
   app.get("/health", async () => ({ ok: true, service: "vida-solidaria-api" }))
 
   await app.register(authRoutes, { prefix: "/api" })
+  await app.register(usersRoutes, { prefix: "/api" })
+  await app.register(projectsRoutes, { prefix: "/api" })
 
-  // TODO (Módulo 2+): registrar acá projects.routes, cases.routes,
-  // logistics.routes, field-ops.routes (con Socket.IO), finance.routes.
+  // TODO (Módulo 3+): registrar acá cases.routes, logistics.routes,
+  // field-ops.routes (con Socket.IO), finance.routes.
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {

@@ -12,7 +12,9 @@ export function middleware(request: NextRequest) {
   const hasSession = request.cookies.has("access_token")
   const { pathname } = request.nextUrl
 
-  if (pathname.startsWith("/dashboard") && !hasSession) {
+  const isProtected = pathname.startsWith("/dashboard") || pathname.startsWith("/proyectos")
+
+  if (isProtected && !hasSession) {
     const loginUrl = request.nextUrl.clone()
     loginUrl.pathname = "/login"
     loginUrl.searchParams.set("redirectTo", pathname)
@@ -23,5 +25,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/proyectos/:path*"],
 }

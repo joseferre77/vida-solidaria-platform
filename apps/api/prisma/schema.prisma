@@ -40,6 +40,9 @@ model User {
   roles             UserRole[]
   refreshTokens     RefreshToken[]
   projectMembership ProjectMember[]
+  ownedProjects     Project[]          @relation("project_owner")
+  taskAssignments   TaskAssignee[]
+  taskComments      TaskComment[]
   auditEntries      AuditLog[]         @relation("audit_actor")
 
   @@map("users")
@@ -147,6 +150,7 @@ model Project {
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
 
+  owner            User              @relation("project_owner", fields: [ownerId], references: [id])
   members          ProjectMember[]
   boards           Board[]
   fundTransactions FundTransaction[]
@@ -219,9 +223,11 @@ model TaskAssignee {
   taskId String @map("task_id")
   userId String @map("user_id")
 
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@id([taskId, userId])
   @@map("task_assignees")
-  Task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model TaskComment {
@@ -232,6 +238,7 @@ model TaskComment {
   createdAt DateTime @default(now()) @map("created_at")
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("task_comments")
 }
