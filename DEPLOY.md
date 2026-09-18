@@ -168,14 +168,12 @@ poder probarlo de verdad.
 ## Checklist antes de dar por cerrado el Módulo 1
 
 - [x] Repo en GitHub (distinto al de RedVivo) con el código pusheado — https://github.com/joseferre77/vida-solidaria-platform
-- [ ] Proyecto Supabase creado + extensión PostGIS activada
-- [ ] Las dos Node.js Apps creadas en hPanel (o resuelto Opción A vs B del
-      monorepo)
-- [ ] Supabase conectado a `vida-solidaria-api` desde el panel
-- [ ] Variables de entorno completas en ambas apps (Paso 3)
-- [ ] Subdominios `api.TU_DOMINIO` y `app.TU_DOMINIO` con DNS apuntando
-      donde indique Hostinger
-- [ ] Primer deploy corrido y el admin logueando bien en `app.TU_DOMINIO`
+- [x] Proyecto Supabase creado (`vida-solidaria-production`, org `nuevogenfilms2025`) — PostGIS no se activó todavía (no hace falta para Módulo 1, ningún dato geográfico se usa aún)
+- [x] Las dos Node.js Apps creadas en hPanel (monorepo con Directorio root `apps/web` y `apps/api` — Opción A del monorepo funcionó, no hizo falta separar repos)
+- [x] Supabase conectado a `vida-solidaria-api` desde el panel
+- [x] Variables de entorno completas en ambas apps
+- [x] Subdominios `gestion.vidasolidariamdp.com` (web) y `api.vidasolidariamdp.com` (api) funcionando con SSL
+- [x] Primer deploy corrido y el admin logueando bien (probado por SSH con `curl` contra `/api/auth/login`, HTTP 200 con el usuario Admin General)
 - [ ] Credenciales reales de Google OAuth (para cerrar ese TODO)
 
 ## Fuentes (documentación oficial de Hostinger, consultada para esta guía)
@@ -228,3 +226,85 @@ repo). **Necesario en el `package.json` raíz y de cada app**: campo
 `"packageManager"` explícito (ya está) — sin esto, el selector de pnpm de
 Hostinger intenta bajar una versión de pnpm que no tiene cacheada y rompe el
 install; con `npm` como gestor de paquetes no pasa esto.
+
+
+## Actualización real 2 (post-intento con la API): mismo patrón, con dos matices nuevos
+
+Desplegar `vida-solidaria-api` (preset **Fastify**) confirmó todo lo de
+arriba y sumó dos cosas nuevas:
+
+**1. El preset "Fastify" no corre NINGÚN paso de build.** A diferencia de
+"Next.js" (que sí ejecuta `build` siempre, aunque ignore cuál elijas), el
+modal de "Configuración de compilación y salida" para Fastify solo tiene dos
+campos (`Gestor de paquetes` y `Archivo de entrada`) — ni build command ni
+directorio de salida. Como nuestro backend es TypeScript (`tsc` deja el
+código en `dist/`), sin un paso de build el `Archivo de entrada` que
+apuntara directo a `dist/server.js` nunca existía y el deploy fallaba
+("Falló la compilación", sin ningún error real en el log — el `npm install`
+terminaba bien y ahí se cortaba todo).
+
+**2. Una vez creada la app, el asistente no tiene forma de editar preset,
+comando de build ni archivo de entrada** — la única forma de cambiarlos es
+repetir el flujo de "elegir repo" desde el panel de esa misma app (no hace
+falta borrar el sitio ni crear uno nuevo, pero sí volver a cargar todo:
+directorio root, preset, variables de entorno, etc.).
+
+**El arreglo, para no depender nunca más de tocar esa config**: se agregó
+`apps/api/server.js`, un archivo JS plano (sin compilar) que Hostinger
+siempre puede ejecutar tal cual, y que hace de puente:
+
+```js
+// apps/api/server.js
+require('./dist/server.js');
+```
+
+`Archivo de entrada` queda fijo en `server.js` (el valor por defecto) para
+siempre — nunca más hace falta tocarlo. Después de cada deploy, por SSH:
+
+```bash
+ssh -p 65002 <usuario>@<ip>
+cd domains/api.vidasolidariamdp.com/hbuilds/current/nodejs
+export PATH=/opt/alt/alt-nodejs20/root/usr/bin:$PATH
+
+npm install                         # trae devDependencies (typescript, prisma, tsx)
+chmod +x node_modules/.bin/* node_modules/@prisma/engines/*   # Hostinger los deja sin +x
+npx prisma generate
+npx tsc -p tsconfig.json            # genera dist/server.js
+npx prisma migrate deploy           # aplica migraciones contra Supabase
+npx tsx prisma/seed.ts              # crea roles/permisos + Admin General (idempotente)
+
+touch tmp/restart.txt
+```
+
+**3. Las variables de entorno cargadas desde el asistente de Hostinger NO se
+actualizan solas si las editás a mano.** El archivo real que Hostinger llena
+en cada deploy es `hbuilds/config/.env` — pero un proceso ya desplegado no
+lo relee al hacer `touch tmp/restart.txt`; hace falta copiarlo manualmente
+adentro de la carpeta de la app:
+
+```bash
+cp domains/api.vidasolidariamdp.com/hbuilds/config/.env \
+   domains/api.vidasolidariamdp.com/hbuilds/current/nodejs/.env
+touch domains/api.vidasolidariamdp.com/hbuilds/current/nodejs/tmp/restart.txt
+```
+
+Esto importa sobre todo para `DATABASE_URL`: Hostinger conecta Supabase y
+agrega `SUPABASE_URL`/`SUPABASE_API_KEY` (para el cliente JS de Supabase,
+que acá no usamos), pero **no agrega `DATABASE_URL`** — hay que armarla a
+mano con el **Session pooler** de Supabase (no el Transaction pooler: este
+es un proceso Node persistente, no funciones serverless, así que el Session
+pooler —puerto 5432— es el correcto y no necesita el parámetro
+`?pgbouncer=true`):
+
+```
+DATABASE_URL='postgresql://postgres.<project-ref>:<db-password>@aws-0-<region>.pooler.supabase.com:5432/postgres'
+```
+
+Se consigue en Supabase → botón **Connect** (arriba a la derecha del
+dashboard) → pestaña **Session pooler**.
+
+## Estado real final
+
+- `vida-solidaria-web` → https://gestion.vidasolidariamdp.com ✅
+- `vida-solidaria-api` → https://api.vidasolidariamdp.com ✅ (Fastify + Prisma + Supabase Postgres, migración inicial aplicada, Admin General sembrado, login probado end-to-end con `curl`)
+- Supabase: proyecto `vida-solidaria-production`, organización `nuevogenfilms2025` (separada de RedVivo), región São Paulo (`sa-east-1`)
