@@ -251,6 +251,7 @@ export interface SurveyItem {
   entity: SurveyEntity
   entityId: string | null
   createdBy: string
+  isActive: boolean
   createdAt: string
   _count?: { questions: number; responses: number }
 }

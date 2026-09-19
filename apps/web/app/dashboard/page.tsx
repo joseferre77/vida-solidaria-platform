@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { fetchMe, logout, type SessionUser } from "../../lib/auth"
+import { fetchMe, hasPermission, logout, type SessionUser } from "../../lib/auth"
 import { RoleGate } from "../../components/RoleGate"
 import {
   getDashboardSummary,
@@ -161,6 +161,9 @@ export default function DashboardPage() {
         <RoleGate user={user ?? null} permission="analytics.read">
           <NavCard label="Analítica" disabled />
         </RoleGate>
+        {(hasPermission(user ?? null, "projects.admin") || hasPermission(user ?? null, "surveys.manage")) && (
+          <NavCard label="Administración" href="/administracion" />
+        )}
       </nav>
 
       <p className="mt-10 text-xs text-cream/40">
