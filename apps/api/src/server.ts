@@ -1,11 +1,16 @@
+import path from "node:path"
+import fs from "node:fs"
 import Fastify, { type FastifyError } from "fastify"
 import cors from "@fastify/cors"
 import cookie from "@fastify/cookie"
+import multipart from "@fastify/multipart"
+import fastifyStatic from "@fastify/static"
 import { env, isProd } from "./config/env"
 import { attachUser } from "./middleware/auth.middleware"
 import { authRoutes } from "./modules/auth/auth.routes"
 import { projectsRoutes } from "./modules/projects/projects.routes"
 import { usersRoutes } from "./modules/users/users.routes"
+import { uploadsRoutes } from "./modules/uploads/uploads.routes"
 
 async function main() {
   const app = Fastify({
@@ -17,6 +22,21 @@ async function main() {
     credentials: true,
   })
   await app.register(cookie)
+  await app.register(multipart)
+
+  // UPLOADS_DIR puede ser relativo (ej. "./uploads") — se resuelve una sola
+  // vez acá contra el cwd del proceso, así uploads.routes.ts y este bloque
+  // de static siempre apuntan exactamente a la misma carpeta absoluta.
+  const uploadsDir = path.resolve(env.UPLOADS_DIR)
+  fs.mkdirSync(uploadsDir, { recursive: true })
+  await app.register(fastifyStatic, {
+    root: uploadsDir,
+    prefix: "/uploads/",
+    // No hace falta index ni listado de directorio: es solo un bucket de
+    // archivos subidos, cada uno referenciado por su URL exacta.
+    index: false,
+    list: false,
+  })
 
   app.addHook("preHandler", attachUser)
 
@@ -25,6 +45,7 @@ async function main() {
   await app.register(authRoutes, { prefix: "/api" })
   await app.register(usersRoutes, { prefix: "/api" })
   await app.register(projectsRoutes, { prefix: "/api" })
+  await app.register(uploadsRoutes, { prefix: "/api" })
 
   // TODO (Módulo 3+): registrar acá cases.routes, logistics.routes,
   // field-ops.routes (con Socket.IO), finance.routes.

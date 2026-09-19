@@ -6,7 +6,12 @@ out/
 .env
 .env.local
 .env.*.local
-uploads/
+# Carpeta de runtime de archivos subidos (UPLOADS_DIR en local; en
+# producción vive fuera del repo, ver apps/api/.env.example). Anclada a
+# la raíz del repo/apps-api para NO matchear apps/api/src/modules/uploads/
+# (el código del módulo de subida de archivos, que sí se versiona).
+/uploads/
+apps/api/uploads/
 *.log
 .DS_Store
 .turbo/

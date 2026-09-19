@@ -148,6 +148,47 @@ export const unassignTask = (taskId: string, userId: string) =>
 export const addTaskComment = (taskId: string, body: string) =>
   apiFetch(`/api/tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify({ body }) })
 
+export interface UploadedFile {
+  fileUrl: string
+  fileName: string
+  mimeType: string
+  size: number
+}
+
+/**
+ * Sube un archivo real a POST /api/uploads (multipart/form-data). Aparte de
+ * apiFetch porque esta ruta NO lleva Content-Type: application/json — el
+ * browser arma el boundary del multipart solo si el header Content-Type no
+ * se toca a mano. Devuelve { fileUrl, ... } listo para pasarle a
+ * addProjectAttachment/addTaskAttachment (todavía por construir su UI).
+ */
+export async function uploadFile(file: File): Promise<UploadedFile> {
+  const formData = new FormData()
+  formData.append("file", file)
+  const res = await fetch(`${API_URL}/api/uploads`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? `Error ${res.status}`)
+  }
+  return res.json()
+}
+
+export const addProjectAttachment = (projectId: string, data: { fileUrl: string; fileName: string }) =>
+  apiFetch(`/api/projects/${projectId}/attachments`, { method: "POST", body: JSON.stringify(data) })
+
+export const deleteProjectAttachment = (attachmentId: string) =>
+  apiFetch(`/api/attachments/${attachmentId}`, { method: "DELETE" })
+
+export const addTaskAttachment = (taskId: string, data: { fileUrl: string }) =>
+  apiFetch(`/api/tasks/${taskId}/attachments`, { method: "POST", body: JSON.stringify(data) })
+
+export const deleteTaskAttachment = (attachmentId: string) =>
+  apiFetch(`/api/task-attachments/${attachmentId}`, { method: "DELETE" })
+
 export const getDashboardSummary = () => apiFetch("/api/dashboard/summary") as Promise<DashboardSummary>
 
 export const listBasicUsers = () => apiFetch("/api/users/basic") as Promise<BasicUser[]>

@@ -22,7 +22,17 @@ const envSchema = z.object({
 
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   COOKIE_DOMAIN: z.string().optional(),
+  // En Hostinger cada redeploy clona a una carpeta de versión NUEVA
+  // (hbuilds/versions/<uuid>/) — un valor relativo quedaría adentro y se
+  // perdería en el próximo deploy. En producción tiene que ser una ruta
+  // ABSOLUTA fuera de hbuilds/current (ver .env.example). server.ts hace
+  // path.resolve(UPLOADS_DIR) contra el cwd del proceso, así que un valor
+  // relativo en local sigue funcionando sin sorpresas.
   UPLOADS_DIR: z.string().default("./uploads"),
+  // Base pública de ESTE backend, para armar URLs absolutas de archivos
+  // subidos (ver modules/uploads/uploads.routes.ts). No confundir con
+  // NEXT_PUBLIC_API_URL del frontend, que apunta a lo mismo desde afuera.
+  PUBLIC_API_URL: z.string().default("http://localhost:4000"),
 })
 
 const parsed = envSchema.safeParse(process.env)
