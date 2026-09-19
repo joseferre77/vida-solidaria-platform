@@ -18,17 +18,32 @@ export type ProjectStatus = "planning" | "active" | "paused" | "done"
 export type TaskPriority = "baja" | "media" | "alta"
 export type ProjectRole = "creador" | "editor" | "visor" | "admin"
 
+export interface LabelItem {
+  id: string
+  name: string
+  color: string
+}
+
 export interface ProjectListItem {
   id: string
+  code: string
   name: string
   description: string | null
   area: string | null
   status: ProjectStatus
+  priority: TaskPriority
+  budget: string | number | null
+  startDate: string | null
+  endDate: string | null
   owner: { id: string; name: string }
   createdAt: string
   memberCount: number
+  caseCount: number
   taskCount: number
+  doneTaskCount: number
+  progressPct: number
   overdueTaskCount: number
+  labels: LabelItem[]
 }
 
 export interface BasicUser {
@@ -82,8 +97,15 @@ export interface DashboardSummary {
 
 export const listProjects = () => apiFetch("/api/projects") as Promise<ProjectListItem[]>
 
-export const createProject = (data: { name: string; description?: string; area?: string }) =>
-  apiFetch("/api/projects", { method: "POST", body: JSON.stringify(data) })
+export const createProject = (data: {
+  name: string
+  description?: string
+  area?: string
+  priority?: TaskPriority
+  budget?: number
+  startDate?: string
+  endDate?: string
+}) => apiFetch("/api/projects", { method: "POST", body: JSON.stringify(data) })
 
 export const getProject = (id: string) => apiFetch(`/api/projects/${id}`) as Promise<ProjectDetail>
 
