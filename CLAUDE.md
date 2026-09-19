@@ -180,3 +180,35 @@ casos. Detalle completo en `ARCHITECTURE.md` §1.
   desplegado y verificado en producción. Método de trabajo de esta etapa:
   "uno y uno" — alternar una mejora visible (frontend) con una de
   cañería (backend), a pedido de Josecito.
+- **Milestone 2 (cierre visual)**: a pedido de Josecito ("vamos con todo lo
+  visual pendiente hasta ahora") se completó de una vez todo el frontend
+  que quedaba pendiente del Módulo 2, en vez de seguir "uno y uno":
+  - Dashboard reescrito: los KPIs y widgets ahora se auto-limitan a los
+    proyectos propios del usuario (se corrigió una fuga de datos org-wide
+    real en `getDashboardSummary`), banner de cronómetro corriendo,
+    resumen financiero, actividad reciente.
+  - `getProjectAccess()` nuevo en `lib/projects.ts`: unifica permiso
+    global + rol por proyecto en el cliente (antes la página de detalle
+    usaba solo permisos globales, igual que el bug ya corregido en el
+    backend y en la lista de `/proyectos`).
+  - Página de detalle de proyecto (`/proyectos/[id]`) reescrita como shell
+    con 10 pestañas: Vista General, Lista de Tareas, Kanban, Procesos,
+    Plan (Gantt liviano sin librería), Notas, Archivos (usa la subida real
+    de archivos), Comentarios (agregado nuevo, `GET /projects/:id/comments`),
+    Hoja de Tiempo, Gastos. Carga perezosa de datos por pestaña.
+  - `TaskDetailModal` completo: checklist, dependencias, comentarios,
+    cronómetro, etiquetas, asignados, recordatorios, clonar/eliminar tarea.
+  - `ProjectHeaderActions`: selector de cronómetro, recordatorios de
+    proyecto, configuración (admin), editar/eliminar proyecto.
+  - Fase G — nueva ruta `/administracion` (global a la organización, no
+    específica de un proyecto): CRUD de Etiquetas, CRUD de Campos
+    Personalizados (Proyectos/Casos), gestión de Encuestas (crear,
+    preguntas, ver respuestas). Gateado por `projects.admin` /
+    `surveys.manage`, con tarjeta nueva en el dashboard.
+  - Todo verificado con `tsc --noEmit` y `next build` limpios antes de cada
+    sync, y desplegado en producción (`api` y `web`) con el procedimiento
+    manual de SSH ya documentado más arriba — se confirmó que
+    "Implementación automática" está activa de nuevo en `web` (dispara con
+    cualquier push a `main`), así que sigue haciendo falta el fix manual de
+    `npm install --omit=dev` + copiar `.env` + `restart.txt` después de
+    cada uno.
