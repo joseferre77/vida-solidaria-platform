@@ -589,6 +589,18 @@ export async function addTaskComment(taskId: string, userId: string, body: strin
   return comment
 }
 
+/** Pestaña "Comentarios" de la página de proyecto: agrega los comentarios de TODAS las tareas del proyecto en un solo feed. */
+export async function listProjectComments(projectId: string) {
+  return prisma.taskComment.findMany({
+    where: { task: { boardColumn: { board: { projectId } } } },
+    orderBy: { createdAt: "desc" },
+    include: {
+      user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+      task: { select: { id: true, title: true } },
+    },
+  })
+}
+
 export async function addTaskAttachment(taskId: string, input: { fileUrl: string; uploadedBy: string }) {
   const attachment = await prisma.taskAttachment.create({ data: { taskId, ...input } })
   await logActivity(input.uploadedBy, "task", taskId, "attachment_added")
@@ -1035,8 +1047,89 @@ export async function updateProjectSettings(
 // Dashboard
 // ────────────────────────────────────────────────
 
-export async function getDashboardSummary(userId: string) {
+const MONTH_LABELS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+
+/**
+ * Widget "Ingresos vs gastos" del dashboard (versión Vida Solidaria del
+ * Invoice Overview de RedVivo): combina FundTransaction (ingresos/egresos
+ * de donaciones, tabla que ya existía desde el schema inicial pero sin
+ * módulo de Finanzas construido todavía) con ProjectExpense (gastos de
+ * proyecto, nuevo). Últimos 6 meses, sin dependencia de locale de Node
+ * (labels de mes hardcodeados) para que no varíe según el ICU del server.
+ */
+async function getFinanceOverview() {
+  const start = new Date()
+  start.setDate(1)
+  start.setHours(0, 0, 0, 0)
+  start.setMonth(start.getMonth() - 5)
+
+  const [transactions, expenses] = await Promise.all([
+    prisma.fundTransaction.findMany({
+      where: { occurredAt: { gte: start } },
+      select: { type: true, amount: true, occurredAt: true },
+    }),
+    prisma.projectExpense.findMany({
+      where: { expenseDate: { gte: start } },
+      select: { amount: true, taxAmount: true, expenseDate: true },
+    }),
+  ])
+
+  const months: { key: string; label: string; income: number; expense: number }[] = []
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date()
+    d.setDate(1)
+    d.setMonth(d.getMonth() - i)
+    months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: MONTH_LABELS[d.getMonth()], income: 0, expense: 0 })
+  }
+  const byKey = new Map(months.map((m) => [m.key, m]))
+  const keyOf = (date: Date) => `${date.getFullYear()}-${date.getMonth()}`
+
+  for (const t of transactions) {
+    const bucket = byKey.get(keyOf(t.occurredAt))
+    if (!bucket) continue
+    if (t.type === "ingreso") bucket.income += Number(t.amount)
+    else bucket.expense += Number(t.amount)
+  }
+  for (const e of expenses) {
+    const bucket = byKey.get(keyOf(e.expenseDate))
+    if (!bucket) continue
+    bucket.expense += Number(e.amount) + Number(e.taxAmount)
+  }
+
+  return {
+    incomeTotal: months.reduce((sum, m) => sum + m.income, 0),
+    expenseTotal: months.reduce((sum, m) => sum + m.expense, 0),
+    months,
+  }
+}
+
+/**
+ * `seeAll` es exactamente el mismo criterio que `canSeeAllProjects` en
+ * project-access.ts (permiso global projects.read/write/admin). Antes esta
+ * función devolvía conteos de TODA la organización sin importar quién
+ * preguntara — un voluntario agregado a un único proyecto puntual veía
+ * "12 proyectos activos" y la actividad reciente de proyectos a los que no
+ * tiene acceso. Mismo bug de fondo que el que motivó project-access.ts,
+ * ahora corregido acá: sin `seeAll`, todo se filtra a los proyectos de los
+ * que el usuario es `ProjectMember`.
+ *
+ * Excepción deliberada: `recentActivity` (AuditLog) usa `entityType` +
+ * `entityId` polimórfico (a veces es un projectId, a veces un taskId, un
+ * milestoneId, etc.) — reconstruir con precisión "toda actividad de MIS
+ * proyectos" requeriría juntar los IDs de tareas/hitos/procesos/notas/
+ * gastos/recordatorios de esos proyectos primero. Para no abrir ese
+ * costado, sin `seeAll` el feed muestra solo las acciones del propio
+ * usuario (siempre seguro, nunca expone actividad ajena) — se etiqueta
+ * distinto en el frontend ("Tu actividad" vs "Actividad reciente").
+ */
+export async function getDashboardSummary(userId: string, opts: { seeAll: boolean; permissions: string[] }) {
+  const { seeAll, permissions } = opts
   const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+  const canSeeFinance = permissions.includes("*") || permissions.includes("finance.read")
+
+  const myProjectFilter = { members: { some: { userId } } }
+  const projectScope = seeAll ? {} : myProjectFilter
+  const taskProjectScope = seeAll ? {} : { boardColumn: { board: { project: myProjectFilter } } }
 
   const [
     activeProjects,
@@ -1047,32 +1140,43 @@ export async function getDashboardSummary(userId: string) {
     teamMembersCount,
     runningTimer,
     recentActivity,
+    financeOverview,
   ] = await Promise.all([
-    prisma.project.count({ where: { status: { in: ["planning", "active"] } } }),
-    prisma.task.count({ where: { boardColumn: { name: { not: DONE_COLUMN_NAME } } } }),
+    prisma.project.count({ where: { status: { in: ["planning", "active"] }, ...projectScope } }),
+    prisma.task.count({ where: { boardColumn: { name: { not: DONE_COLUMN_NAME } }, ...taskProjectScope } }),
     prisma.task.count({
       where: { assignees: { some: { userId } }, boardColumn: { name: { not: DONE_COLUMN_NAME } } },
     }),
     prisma.task.count({
-      where: { boardColumn: { name: { not: DONE_COLUMN_NAME } }, dueDate: { lte: soon } },
+      where: { boardColumn: { name: { not: DONE_COLUMN_NAME } }, dueDate: { lte: soon }, ...taskProjectScope },
     }),
     prisma.projectMilestone.findMany({
-      where: { status: "pendiente", dueDate: { gte: new Date() } },
+      where: { status: "pendiente", dueDate: { gte: new Date() }, ...(seeAll ? {} : { project: myProjectFilter }) },
       orderBy: { dueDate: "asc" },
       take: 5,
       include: { project: { select: { id: true, name: true, code: true } } },
     }),
-    prisma.projectMember.findMany({ distinct: ["userId"], select: { userId: true } }).then((r) => r.length),
+    seeAll
+      ? prisma.projectMember.findMany({ distinct: ["userId"], select: { userId: true } }).then((r) => r.length)
+      : prisma.projectMember
+          .findMany({ where: { project: myProjectFilter }, distinct: ["userId"], select: { userId: true } })
+          .then((r) => r.length),
     getRunningTimer(userId),
     prisma.auditLog.findMany({
+      where: seeAll ? undefined : { userId },
       orderBy: { createdAt: "desc" },
       take: 10,
       include: { user: { select: { id: true, name: true } } },
     }),
+    canSeeFinance ? getFinanceOverview() : Promise.resolve(null),
   ])
 
-  // Distribución de tareas por columna (para el donut "Tasks Overview")
-  const tasksByStatus = await prisma.task.groupBy({ by: ["boardColumnId"], _count: { _all: true } })
+  // Distribución de tareas por columna (para el widget "Tasks Overview")
+  const tasksByStatus = await prisma.task.groupBy({
+    by: ["boardColumnId"],
+    _count: { _all: true },
+    where: taskProjectScope,
+  })
   const columnNames = await prisma.boardColumn.findMany({
     where: { id: { in: tasksByStatus.map((t) => t.boardColumnId) } },
     select: { id: true, name: true },
@@ -1085,6 +1189,7 @@ export async function getDashboardSummary(userId: string) {
   }, {})
 
   return {
+    scopedToOwnProjects: !seeAll,
     activeProjects,
     totalOpenTasks,
     myTasks,
@@ -1094,5 +1199,6 @@ export async function getDashboardSummary(userId: string) {
     upcomingMilestones,
     runningTimer,
     recentActivity,
+    financeOverview,
   }
 }

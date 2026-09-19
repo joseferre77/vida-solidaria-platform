@@ -598,6 +598,16 @@ export async function projectsRoutes(app: FastifyInstance) {
     },
   )
 
+  // Feed agregado de comentarios de todas las tareas del proyecto (pestaña "Comentarios").
+  app.get(
+    "/projects/:id/comments",
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
+    async (request) => {
+      const { id } = request.params as { id: string }
+      return service.listProjectComments(id)
+    },
+  )
+
   // ── Checklist ──
   app.post(
     "/tasks/:id/checklist",
@@ -994,7 +1004,10 @@ export async function projectsRoutes(app: FastifyInstance) {
     "/dashboard/summary",
     { preHandler: [requireAuth] },
     async (request) => {
-      return service.getDashboardSummary(request.user!.sub)
+      return service.getDashboardSummary(request.user!.sub, {
+        seeAll: canSeeAllProjects(request),
+        permissions: request.user!.permissions,
+      })
     },
   )
 }
