@@ -8,6 +8,15 @@
  * Tareas Kanban, Procesos, Plan, Notas, Archivos, Comentarios, Hoja de
  * Tiempo (cronómetro) y Gastos. Además: hitos, dependencias entre tareas,
  * checklist, etiquetas, campos personalizados, encuestas y recordatorios.
+ *
+ * Trazabilidad: toda mutación que importa (crear/editar/borrar algo que un
+ * humano hizo, no solo un cálculo derivado) queda registrada en AuditLog
+ * vía `logActivity`, con quién la hizo. Antes de esto el modelo existía
+ * pero nada lo escribía — el widget "actividad reciente" del dashboard
+ * siempre devolvía vacío. El `diff` que se guarda es el input que se mandó
+ * a cambiar, no un before/after real (evita una consulta extra por
+ * escritura); alcanza para auditar "quién tocó qué y cuándo", que es lo
+ * que pide CLAUDE.md, sin pretender ser un historial de valores previos.
  */
 import { prisma } from "../../lib/prisma"
 import type {
@@ -27,6 +36,26 @@ const DONE_COLUMN_NAME = "Hecho"
 
 /** Error de negocio (no de validación) — la ruta lo traduce a 409/422. */
 export class BusinessRuleError extends Error {}
+
+// ────────────────────────────────────────────────
+// Auditoría (AuditLog) — trazabilidad de quién hizo qué
+// ────────────────────────────────────────────────
+
+async function logActivity(
+  actorId: string,
+  entityType: string,
+  entityId: string,
+  action: string,
+  diff?: unknown,
+) {
+  try {
+    await prisma.auditLog.create({
+      data: { userId: actorId, entityType, entityId, action, diff: diff === undefined ? undefined : (diff as never) },
+    })
+  } catch {
+    // La auditoría nunca debe tirar abajo la operación real que la generó.
+  }
+}
 
 // ────────────────────────────────────────────────
 // Contador atómico → código de proyecto (PROY-0001, PROY-0002, ...)
@@ -113,7 +142,7 @@ export async function createProject(input: {
   ownerId: string
 }) {
   const code = await nextProjectCode()
-  return prisma.project.create({
+  const project = await prisma.project.create({
     data: {
       code,
       name: input.name,
@@ -141,6 +170,8 @@ export async function createProject(input: {
     },
     include: { boards: { include: { columns: true } }, members: true, settings: true },
   })
+  await logActivity(input.ownerId, "project", project.id, "created", { name: input.name, code })
+  return project
 }
 
 /** Vista General: metadatos del proyecto + tablero (para Kanban) + contadores. */
@@ -203,24 +234,31 @@ export async function updateProject(
     startDate: Date | null
     endDate: Date | null
   }>,
+  actorId: string,
 ) {
-  return prisma.project.update({ where: { id: projectId }, data: input })
+  const project = await prisma.project.update({ where: { id: projectId }, data: input })
+  await logActivity(actorId, "project", projectId, "updated", input)
+  return project
 }
 
-export async function deleteProject(projectId: string) {
+export async function deleteProject(projectId: string, actorId: string) {
   await prisma.project.delete({ where: { id: projectId } })
+  await logActivity(actorId, "project", projectId, "deleted")
 }
 
-export async function addProjectMember(projectId: string, userId: string, projectRole: ProjectRole) {
-  return prisma.projectMember.upsert({
+export async function addProjectMember(projectId: string, userId: string, projectRole: ProjectRole, actorId: string) {
+  const member = await prisma.projectMember.upsert({
     where: { projectId_userId: { projectId, userId } },
     create: { projectId, userId, projectRole },
     update: { projectRole },
   })
+  await logActivity(actorId, "project", projectId, "member_added", { userId, projectRole })
+  return member
 }
 
-export async function removeProjectMember(projectId: string, userId: string) {
+export async function removeProjectMember(projectId: string, userId: string, actorId: string) {
   await prisma.projectMember.delete({ where: { projectId_userId: { projectId, userId } } })
+  await logActivity(actorId, "project", projectId, "member_removed", { userId })
 }
 
 // ────────────────────────────────────────────────
@@ -236,15 +274,18 @@ export async function listProjectCases(projectId: string) {
 }
 
 export async function linkCase(projectId: string, caseId: string, linkedBy: string) {
-  return prisma.projectCase.upsert({
+  const link = await prisma.projectCase.upsert({
     where: { projectId_caseId: { projectId, caseId } },
     create: { projectId, caseId, linkedBy },
     update: {},
   })
+  await logActivity(linkedBy, "project", projectId, "case_linked", { caseId })
+  return link
 }
 
-export async function unlinkCase(projectId: string, caseId: string) {
+export async function unlinkCase(projectId: string, caseId: string, actorId: string) {
   await prisma.projectCase.delete({ where: { projectId_caseId: { projectId, caseId } } })
+  await logActivity(actorId, "project", projectId, "case_unlinked", { caseId })
 }
 
 // ────────────────────────────────────────────────
@@ -258,22 +299,29 @@ export async function listMilestones(projectId: string) {
 export async function createMilestone(
   projectId: string,
   input: { title: string; description?: string; dueDate?: Date },
+  actorId: string,
 ) {
-  return prisma.projectMilestone.create({ data: { projectId, ...input } })
+  const milestone = await prisma.projectMilestone.create({ data: { projectId, ...input } })
+  await logActivity(actorId, "milestone", milestone.id, "created", { projectId, title: input.title })
+  return milestone
 }
 
 export async function updateMilestone(
   id: string,
   input: Partial<{ title: string; description: string | null; dueDate: Date | null; status: MilestoneStatus }>,
+  actorId: string,
 ) {
   const data = { ...input } as typeof input & { completedAt?: Date | null }
   if (input.status === "completado") data.completedAt = new Date()
   if (input.status === "pendiente") data.completedAt = null
-  return prisma.projectMilestone.update({ where: { id }, data })
+  const milestone = await prisma.projectMilestone.update({ where: { id }, data })
+  await logActivity(actorId, "milestone", id, "updated", input)
+  return milestone
 }
 
-export async function deleteMilestone(id: string) {
+export async function deleteMilestone(id: string, actorId: string) {
   await prisma.projectMilestone.delete({ where: { id } })
+  await logActivity(actorId, "milestone", id, "deleted")
 }
 
 // ────────────────────────────────────────────────
@@ -288,16 +336,29 @@ export async function listProcesses(projectId: string) {
   })
 }
 
-export async function createProcess(projectId: string, input: { name: string; color?: string; sortOrder?: number }) {
-  return prisma.projectProcess.create({ data: { projectId, ...input } })
+export async function createProcess(
+  projectId: string,
+  input: { name: string; color?: string; sortOrder?: number },
+  actorId: string,
+) {
+  const process = await prisma.projectProcess.create({ data: { projectId, ...input } })
+  await logActivity(actorId, "process", process.id, "created", { projectId, name: input.name })
+  return process
 }
 
-export async function updateProcess(id: string, input: Partial<{ name: string; color: string; sortOrder: number }>) {
-  return prisma.projectProcess.update({ where: { id }, data: input })
+export async function updateProcess(
+  id: string,
+  input: Partial<{ name: string; color: string; sortOrder: number }>,
+  actorId: string,
+) {
+  const process = await prisma.projectProcess.update({ where: { id }, data: input })
+  await logActivity(actorId, "process", id, "updated", input)
+  return process
 }
 
-export async function deleteProcess(id: string) {
+export async function deleteProcess(id: string, actorId: string) {
   await prisma.projectProcess.delete({ where: { id } })
+  await logActivity(actorId, "process", id, "deleted")
 }
 
 /** Vista "Plan" (Gantt agrupado por Proceso): tareas del proyecto con fechas. */
@@ -345,11 +406,14 @@ export async function addProjectAttachment(
   projectId: string,
   input: { fileUrl: string; fileName: string; uploadedBy: string },
 ) {
-  return prisma.projectAttachment.create({ data: { projectId, ...input } })
+  const attachment = await prisma.projectAttachment.create({ data: { projectId, ...input } })
+  await logActivity(input.uploadedBy, "project", projectId, "attachment_added", { fileName: input.fileName })
+  return attachment
 }
 
-export async function deleteProjectAttachment(id: string) {
-  await prisma.projectAttachment.delete({ where: { id } })
+export async function deleteProjectAttachment(id: string, actorId: string) {
+  const attachment = await prisma.projectAttachment.delete({ where: { id } })
+  await logActivity(actorId, "project", attachment.projectId, "attachment_deleted", { fileName: attachment.fileName })
 }
 
 // ────────────────────────────────────────────────
@@ -360,40 +424,51 @@ export async function listLabels() {
   return prisma.label.findMany({ orderBy: { name: "asc" } })
 }
 
-export async function createLabel(input: { name: string; color?: string }) {
-  return prisma.label.create({ data: input })
+export async function createLabel(input: { name: string; color?: string }, actorId: string) {
+  const label = await prisma.label.create({ data: input })
+  await logActivity(actorId, "label", label.id, "created", input)
+  return label
 }
 
-export async function updateLabel(id: string, input: Partial<{ name: string; color: string }>) {
-  return prisma.label.update({ where: { id }, data: input })
+export async function updateLabel(id: string, input: Partial<{ name: string; color: string }>, actorId: string) {
+  const label = await prisma.label.update({ where: { id }, data: input })
+  await logActivity(actorId, "label", id, "updated", input)
+  return label
 }
 
-export async function deleteLabel(id: string) {
+export async function deleteLabel(id: string, actorId: string) {
   await prisma.label.delete({ where: { id } })
+  await logActivity(actorId, "label", id, "deleted")
 }
 
-export async function attachProjectLabel(projectId: string, labelId: string) {
-  return prisma.projectLabel.upsert({
+export async function attachProjectLabel(projectId: string, labelId: string, actorId: string) {
+  const link = await prisma.projectLabel.upsert({
     where: { projectId_labelId: { projectId, labelId } },
     create: { projectId, labelId },
     update: {},
   })
+  await logActivity(actorId, "project", projectId, "label_attached", { labelId })
+  return link
 }
 
-export async function detachProjectLabel(projectId: string, labelId: string) {
+export async function detachProjectLabel(projectId: string, labelId: string, actorId: string) {
   await prisma.projectLabel.delete({ where: { projectId_labelId: { projectId, labelId } } })
+  await logActivity(actorId, "project", projectId, "label_detached", { labelId })
 }
 
-export async function attachTaskLabel(taskId: string, labelId: string) {
-  return prisma.taskLabel.upsert({
+export async function attachTaskLabel(taskId: string, labelId: string, actorId: string) {
+  const link = await prisma.taskLabel.upsert({
     where: { taskId_labelId: { taskId, labelId } },
     create: { taskId, labelId },
     update: {},
   })
+  await logActivity(actorId, "task", taskId, "label_attached", { labelId })
+  return link
 }
 
-export async function detachTaskLabel(taskId: string, labelId: string) {
+export async function detachTaskLabel(taskId: string, labelId: string, actorId: string) {
   await prisma.taskLabel.delete({ where: { taskId_labelId: { taskId, labelId } } })
+  await logActivity(actorId, "task", taskId, "label_detached", { labelId })
 }
 
 // ────────────────────────────────────────────────
@@ -425,7 +500,7 @@ export async function createTask(input: {
   estimatedMinutes?: number
   createdBy: string
 }) {
-  return prisma.task.create({
+  const task = await prisma.task.create({
     data: {
       boardColumnId: input.boardColumnId,
       processId: input.processId,
@@ -438,6 +513,8 @@ export async function createTask(input: {
       createdBy: input.createdBy,
     },
   })
+  await logActivity(input.createdBy, "task", task.id, "created", { title: input.title })
+  return task
 }
 
 /** Detalle completo de una tarea para el modal (metadata + checklist + subtareas/deps + tiempo). */
@@ -476,70 +553,91 @@ export async function updateTask(
     boardColumnId: string
     processId: string | null
   }>,
+  actorId: string,
 ) {
-  return prisma.task.update({ where: { id: taskId }, data: input })
+  const task = await prisma.task.update({ where: { id: taskId }, data: input })
+  await logActivity(actorId, "task", taskId, "updated", input)
+  return task
 }
 
-export async function deleteTask(taskId: string) {
+export async function deleteTask(taskId: string, actorId: string) {
   await prisma.task.delete({ where: { id: taskId } })
+  await logActivity(actorId, "task", taskId, "deleted")
 }
 
-export async function assignTask(taskId: string, userId: string) {
-  return prisma.taskAssignee.upsert({
+export async function assignTask(taskId: string, userId: string, actorId: string) {
+  const assignee = await prisma.taskAssignee.upsert({
     where: { taskId_userId: { taskId, userId } },
     create: { taskId, userId },
     update: {},
   })
+  await logActivity(actorId, "task", taskId, "assigned", { userId })
+  return assignee
 }
 
-export async function unassignTask(taskId: string, userId: string) {
+export async function unassignTask(taskId: string, userId: string, actorId: string) {
   await prisma.taskAssignee.delete({ where: { taskId_userId: { taskId, userId } } })
+  await logActivity(actorId, "task", taskId, "unassigned", { userId })
 }
 
 export async function addTaskComment(taskId: string, userId: string, body: string) {
-  return prisma.taskComment.create({
+  const comment = await prisma.taskComment.create({
     data: { taskId, userId, body },
     include: { user: { select: { id: true, name: true, avatarUrl: true } } },
   })
+  await logActivity(userId, "task", taskId, "commented")
+  return comment
 }
 
 export async function addTaskAttachment(taskId: string, input: { fileUrl: string; uploadedBy: string }) {
-  return prisma.taskAttachment.create({ data: { taskId, ...input } })
+  const attachment = await prisma.taskAttachment.create({ data: { taskId, ...input } })
+  await logActivity(input.uploadedBy, "task", taskId, "attachment_added")
+  return attachment
 }
 
-export async function deleteTaskAttachment(id: string) {
-  await prisma.taskAttachment.delete({ where: { id } })
+export async function deleteTaskAttachment(id: string, actorId: string) {
+  const attachment = await prisma.taskAttachment.delete({ where: { id } })
+  await logActivity(actorId, "task", attachment.taskId, "attachment_deleted")
 }
 
 // ── Checklist ──
 
-export async function addChecklistItem(taskId: string, title: string) {
+export async function addChecklistItem(taskId: string, title: string, actorId: string) {
   const count = await prisma.taskChecklistItem.count({ where: { taskId } })
-  return prisma.taskChecklistItem.create({ data: { taskId, title, sortOrder: count } })
+  const item = await prisma.taskChecklistItem.create({ data: { taskId, title, sortOrder: count } })
+  await logActivity(actorId, "task", taskId, "checklist_item_added", { title })
+  return item
 }
 
 export async function updateChecklistItem(
   id: string,
   input: Partial<{ title: string; isChecked: boolean; sortOrder: number }>,
+  actorId: string,
 ) {
-  return prisma.taskChecklistItem.update({ where: { id }, data: input })
+  const item = await prisma.taskChecklistItem.update({ where: { id }, data: input })
+  await logActivity(actorId, "task", item.taskId, "checklist_item_updated", input)
+  return item
 }
 
-export async function deleteChecklistItem(id: string) {
-  await prisma.taskChecklistItem.delete({ where: { id } })
+export async function deleteChecklistItem(id: string, actorId: string) {
+  const item = await prisma.taskChecklistItem.delete({ where: { id } })
+  await logActivity(actorId, "task", item.taskId, "checklist_item_deleted", { title: item.title })
 }
 
 // ── Dependencias ──
 
-export async function addTaskDependency(blockerTaskId: string, blockedTaskId: string) {
+export async function addTaskDependency(blockerTaskId: string, blockedTaskId: string, actorId: string) {
   if (blockerTaskId === blockedTaskId) {
     throw new BusinessRuleError("Una tarea no puede depender de sí misma")
   }
-  return prisma.taskDependency.create({ data: { blockerTaskId, blockedTaskId } })
+  const dep = await prisma.taskDependency.create({ data: { blockerTaskId, blockedTaskId } })
+  await logActivity(actorId, "task", blockerTaskId, "dependency_added", { blockedTaskId })
+  return dep
 }
 
-export async function removeTaskDependency(id: string) {
-  await prisma.taskDependency.delete({ where: { id } })
+export async function removeTaskDependency(id: string, actorId: string) {
+  const dep = await prisma.taskDependency.delete({ where: { id } })
+  await logActivity(actorId, "task", dep.blockerTaskId, "dependency_removed", { blockedTaskId: dep.blockedTaskId })
 }
 
 // ────────────────────────────────────────────────
@@ -562,7 +660,9 @@ export async function startTimer(taskId: string, userId: string, note?: string) 
       "Ya tenés un cronómetro corriendo en otra tarea. Detenelo antes de iniciar uno nuevo.",
     )
   }
-  return prisma.timeEntry.create({ data: { taskId, userId, note } })
+  const entry = await prisma.timeEntry.create({ data: { taskId, userId, note } })
+  await logActivity(userId, "task", taskId, "timer_started")
+  return entry
 }
 
 export async function stopTimer(timeEntryId: string, userId: string) {
@@ -570,7 +670,11 @@ export async function stopTimer(timeEntryId: string, userId: string) {
   if (!entry) throw new BusinessRuleError("Cronómetro no encontrado")
   if (entry.userId !== userId) throw new BusinessRuleError("No podés detener el cronómetro de otro usuario")
   if (entry.endedAt) throw new BusinessRuleError("Ese cronómetro ya está detenido")
-  return prisma.timeEntry.update({ where: { id: timeEntryId }, data: { endedAt: new Date() } })
+  const stopped = await prisma.timeEntry.update({ where: { id: timeEntryId }, data: { endedAt: new Date() } })
+  await logActivity(userId, "task", entry.taskId, "timer_stopped", {
+    minutes: entryMinutes(entry.startedAt, stopped.endedAt),
+  })
+  return stopped
 }
 
 export async function listTaskTimeEntries(taskId: string) {
@@ -619,17 +723,22 @@ export async function listCustomFieldDefinitions(entity: CustomFieldEntity) {
   return prisma.customFieldDefinition.findMany({ where: { entity }, orderBy: { sortOrder: "asc" } })
 }
 
-export async function createCustomFieldDefinition(input: {
-  entity: CustomFieldEntity
-  label: string
-  fieldType: CustomFieldType
-  options?: string[]
-  required?: boolean
-  sortOrder?: number
-  showInTable?: boolean
-  filterable?: boolean
-}) {
-  return prisma.customFieldDefinition.create({ data: input })
+export async function createCustomFieldDefinition(
+  input: {
+    entity: CustomFieldEntity
+    label: string
+    fieldType: CustomFieldType
+    options?: string[]
+    required?: boolean
+    sortOrder?: number
+    showInTable?: boolean
+    filterable?: boolean
+  },
+  actorId: string,
+) {
+  const def = await prisma.customFieldDefinition.create({ data: input })
+  await logActivity(actorId, "custom_field_definition", def.id, "created", { entity: input.entity, label: input.label })
+  return def
 }
 
 export async function updateCustomFieldDefinition(
@@ -643,12 +752,16 @@ export async function updateCustomFieldDefinition(
     showInTable: boolean
     filterable: boolean
   }>,
+  actorId: string,
 ) {
-  return prisma.customFieldDefinition.update({ where: { id }, data: input })
+  const def = await prisma.customFieldDefinition.update({ where: { id }, data: input })
+  await logActivity(actorId, "custom_field_definition", id, "updated", input)
+  return def
 }
 
-export async function deleteCustomFieldDefinition(id: string) {
+export async function deleteCustomFieldDefinition(id: string, actorId: string) {
   await prisma.customFieldDefinition.delete({ where: { id } })
+  await logActivity(actorId, "custom_field_definition", id, "deleted")
 }
 
 /** Combina definiciones + valores existentes para una entidad puntual (ej. un proyecto). */
@@ -661,12 +774,14 @@ export async function getCustomFieldValues(entity: CustomFieldEntity, entityId: 
   return definitions.map((def) => ({ definition: def, value: valueByDefinition.get(def.id) ?? null }))
 }
 
-export async function setCustomFieldValue(definitionId: string, entityId: string, value: unknown) {
-  return prisma.customFieldValue.upsert({
+export async function setCustomFieldValue(definitionId: string, entityId: string, value: unknown, actorId: string) {
+  const record = await prisma.customFieldValue.upsert({
     where: { definitionId_entityId: { definitionId, entityId } },
     create: { definitionId, entityId, value: value as never },
     update: { value: value as never },
   })
+  await logActivity(actorId, "custom_field_value", entityId, "custom_field_set", { definitionId })
+  return record
 }
 
 // ────────────────────────────────────────────────
@@ -688,7 +803,9 @@ export async function createSurvey(input: {
   entityId?: string
   createdBy: string
 }) {
-  return prisma.survey.create({ data: input })
+  const survey = await prisma.survey.create({ data: input })
+  await logActivity(input.createdBy, "survey", survey.id, "created", { title: input.title })
+  return survey
 }
 
 export async function getSurveyDetail(id: string) {
@@ -701,16 +818,21 @@ export async function getSurveyDetail(id: string) {
 export async function addSurveyQuestion(
   surveyId: string,
   input: { label: string; type: SurveyQuestionType; options?: string[]; required?: boolean; sortOrder?: number },
+  actorId: string,
 ) {
-  return prisma.surveyQuestion.create({ data: { surveyId, ...input } })
+  const question = await prisma.surveyQuestion.create({ data: { surveyId, ...input } })
+  await logActivity(actorId, "survey", surveyId, "question_added", { label: input.label })
+  return question
 }
 
-export async function deleteSurveyQuestion(id: string) {
-  await prisma.surveyQuestion.delete({ where: { id } })
+export async function deleteSurveyQuestion(id: string, actorId: string) {
+  const question = await prisma.surveyQuestion.delete({ where: { id } })
+  await logActivity(actorId, "survey", question.surveyId, "question_deleted", { label: question.label })
 }
 
-export async function deleteSurvey(id: string) {
+export async function deleteSurvey(id: string, actorId: string) {
   await prisma.survey.delete({ where: { id } })
+  await logActivity(actorId, "survey", id, "deleted")
 }
 
 export async function submitSurveyResponse(
@@ -718,7 +840,7 @@ export async function submitSurveyResponse(
   respondentUserId: string,
   answers: Array<{ questionId: string; value?: unknown }>,
 ) {
-  return prisma.surveyResponse.create({
+  const response = await prisma.surveyResponse.create({
     data: {
       surveyId,
       respondentUserId,
@@ -728,6 +850,8 @@ export async function submitSurveyResponse(
     },
     include: { answers: true },
   })
+  await logActivity(respondentUserId, "survey", surveyId, "response_submitted")
+  return response
 }
 
 export async function listSurveyResponses(surveyId: string) {
@@ -770,7 +894,13 @@ export async function createProjectExpense(
     createdBy: string
   },
 ) {
-  return prisma.projectExpense.create({ data: { projectId, ...input } })
+  const expense = await prisma.projectExpense.create({ data: { projectId, ...input } })
+  await logActivity(input.createdBy, "project", projectId, "expense_added", {
+    title: input.title,
+    amount: input.amount,
+    category: input.category,
+  })
+  return expense
 }
 
 export async function updateProjectExpense(
@@ -784,12 +914,19 @@ export async function updateProjectExpense(
     taxAmount: number
     expenseDate: Date
   }>,
+  actorId: string,
 ) {
-  return prisma.projectExpense.update({ where: { id }, data: input })
+  const expense = await prisma.projectExpense.update({ where: { id }, data: input })
+  await logActivity(actorId, "project", expense.projectId, "expense_updated", { expenseId: id, ...input })
+  return expense
 }
 
-export async function deleteProjectExpense(id: string) {
-  await prisma.projectExpense.delete({ where: { id } })
+export async function deleteProjectExpense(id: string, actorId: string) {
+  const expense = await prisma.projectExpense.delete({ where: { id } })
+  await logActivity(actorId, "project", expense.projectId, "expense_deleted", {
+    title: expense.title,
+    amount: expense.amount,
+  })
 }
 
 // ────────────────────────────────────────────────
@@ -804,16 +941,28 @@ export async function listProjectNotes(projectId: string) {
   })
 }
 
-export async function createProjectNote(projectId: string, input: { authorId: string; content: string; isPinned?: boolean }) {
-  return prisma.projectNote.create({ data: { projectId, ...input } })
+export async function createProjectNote(
+  projectId: string,
+  input: { authorId: string; content: string; isPinned?: boolean },
+) {
+  const note = await prisma.projectNote.create({ data: { projectId, ...input } })
+  await logActivity(input.authorId, "project", projectId, "note_added")
+  return note
 }
 
-export async function updateProjectNote(id: string, input: Partial<{ content: string; isPinned: boolean }>) {
-  return prisma.projectNote.update({ where: { id }, data: input })
+export async function updateProjectNote(
+  id: string,
+  input: Partial<{ content: string; isPinned: boolean }>,
+  actorId: string,
+) {
+  const note = await prisma.projectNote.update({ where: { id }, data: input })
+  await logActivity(actorId, "project", note.projectId, "note_updated", { noteId: id })
+  return note
 }
 
-export async function deleteProjectNote(id: string) {
-  await prisma.projectNote.delete({ where: { id } })
+export async function deleteProjectNote(id: string, actorId: string) {
+  const note = await prisma.projectNote.delete({ where: { id } })
+  await logActivity(actorId, "project", note.projectId, "note_deleted", { noteId: id })
 }
 
 // ────────────────────────────────────────────────
@@ -831,15 +980,24 @@ export async function createReminder(input: {
   remindAt: Date
   createdBy: string
 }) {
-  return prisma.reminder.create({ data: input })
+  const reminder = await prisma.reminder.create({ data: input })
+  await logActivity(input.createdBy, input.entity.toLowerCase(), input.entityId, "reminder_created", {
+    title: input.title,
+  })
+  return reminder
 }
 
-export async function markReminderDone(id: string) {
-  return prisma.reminder.update({ where: { id }, data: { isDone: true } })
+export async function markReminderDone(id: string, actorId: string) {
+  const reminder = await prisma.reminder.update({ where: { id }, data: { isDone: true } })
+  await logActivity(actorId, reminder.entity.toLowerCase(), reminder.entityId, "reminder_done", { title: reminder.title })
+  return reminder
 }
 
-export async function deleteReminder(id: string) {
-  await prisma.reminder.delete({ where: { id } })
+export async function deleteReminder(id: string, actorId: string) {
+  const reminder = await prisma.reminder.delete({ where: { id } })
+  await logActivity(actorId, reminder.entity.toLowerCase(), reminder.entityId, "reminder_deleted", {
+    title: reminder.title,
+  })
 }
 
 // ────────────────────────────────────────────────
@@ -862,12 +1020,15 @@ export async function updateProjectSettings(
     isArchived: boolean
     extra: unknown
   }>,
+  actorId: string,
 ) {
-  return prisma.projectSettings.upsert({
+  const settings = await prisma.projectSettings.upsert({
     where: { projectId },
     create: { projectId, ...input } as never,
     update: input as never,
   })
+  await logActivity(actorId, "project", projectId, "settings_updated", input)
+  return settings
 }
 
 // ────────────────────────────────────────────────
