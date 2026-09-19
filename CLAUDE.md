@@ -83,8 +83,46 @@ casos. Detalle completo en `ARCHITECTURE.md` §1.
       automáticamente) y confirmando `/api/dashboard/summary`,
       `/api/projects`, `/api/users/basic` en producción. RBAC ya estaba
       definido desde Milestone 1 (`projects.read/write/admin`).
+- [x] **Módulo 2 — extendido con el resto del esquema de gestión de
+      proyectos** (hitos, procesos/tableros por etapa, gastos, notas,
+      recordatorios, configuración por proyecto, adjuntos, checklist y
+      dependencias de tareas, hoja de tiempo, campos personalizados,
+      encuestas) — migración `20260919121958_proyectos_ui_extensions`
+      aplicada en producción sin backfill (todo nullable/tablas nuevas).
+- [x] **Autorización por proyecto (`project-access.ts`)**: hasta acá
+      `projects.read/write/admin` (permiso GLOBAL) eran los únicos
+      guardianes de las rutas de Proyectos, y ningún rol operativo
+      (voluntario, coordinación) lo tiene — así que un miembro agregado a
+      un proyecto puntual (`ProjectMember.projectRole`) quedaba afuera de
+      TODO el módulo. Se agregó una capa que concede acceso si se cumple
+      el permiso global (dirección/admin, ven todo) O el rol de membresía
+      en ESE proyecto (creador/editor/admin escriben, visor solo lee) — 79
+      rutas migradas. Mismo bug espejado y corregido en el frontend
+      (`/proyectos` dejó de exigir el permiso global para listar).
+- [x] **Auditoría real (`AuditLog`)**: el widget de "actividad reciente" del
+      dashboard existía desde Milestone 1 pero nada escribía en la tabla.
+      Se agregó `logActivity()` (try/catch, nunca rompe la operación real)
+      enganchado a las ~40 funciones que mutan datos de Proyectos.
+      Verificado en producción (crear/borrar hito → aparece en el log).
+- [x] **`/proyectos` rediseñada como tabla real** (código, título+área+
+      etiquetas, casos, presupuesto, fechas, barra de progreso, prioridad,
+      estado) en vez de tarjetas de 3 campos — refleja el esquema
+      extendido. Modal de creación con prioridad/presupuesto/fechas.
+- [x] **Subida real de archivos (`POST /api/uploads`)**: los adjuntos de
+      Proyectos/Tareas solo aceptaban una URL ya alojada en otro lado.
+      Ahora hay un endpoint multipart (whitelist de tipos, 20MB máx.,
+      nombre aleatorio) servido de vuelta con `@fastify/static`. **Ojo**:
+      en Hostinger `UPLOADS_DIR` tiene que ser una ruta ABSOLUTA fuera de
+      `hbuilds/current` (cada redeploy clona a una carpeta de versión
+      nueva) — ya configurada en el `.env` de producción apuntando a
+      `hbuilds/uploads` (hermana de `current`/`versions`/`config`).
+      Falta: UI de adjuntos en el frontend (el helper `uploadFile()` en
+      `apps/web/lib/projects.ts` ya está listo, sin consumidor todavía).
 - [ ] Nada de Módulo 3 en adelante todavía (Casos, Logística, Campo,
-      Finanzas, Analítica).
+      Finanzas, Analítica). Tampoco hay UI para: hitos, procesos/tableros
+      por etapa, gastos, notas, recordatorios, configuración de proyecto,
+      campos personalizados/encuestas (todo el backend ya existe, ver
+      arriba) — es el próximo tramo "visible" grande del Módulo 2.
 
 ## Roadmap completo (ver detalle en ARCHITECTURE.md §7)
 
@@ -133,3 +171,12 @@ casos. Detalle completo en `ARCHITECTURE.md` §1.
   contra Postgres+Redis reales. Runbook de deploy a Hostinger. Google OAuth
   y el deploy real quedan pendientes de datos que solo tiene Josecito
   (credenciales de Google Cloud Console; tipo de plan de Hostinger).
+- **Milestone 2 (extendido)**: esquema completo de Proyectos (hitos,
+  procesos, gastos, notas, recordatorios, configuración, adjuntos,
+  checklist, dependencias, hoja de tiempo, campos personalizados,
+  encuestas), autorización por proyecto conectando permisos globales con
+  roles de membresía (79 rutas), auditoría real, tabla `/proyectos`
+  rediseñada, y subida real de archivos (`POST /api/uploads`). Todo
+  desplegado y verificado en producción. Método de trabajo de esta etapa:
+  "uno y uno" — alternar una mejora visible (frontend) con una de
+  cañería (backend), a pedido de Josecito.
