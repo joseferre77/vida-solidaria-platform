@@ -26,36 +26,50 @@ enum UserStatus {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String?  @map("password_hash")
-  googleId     String?  @unique @map("google_id")
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String?    @map("password_hash")
+  googleId     String?    @unique @map("google_id")
   name         String
   phone        String?
-  avatarUrl    String?  @map("avatar_url")
+  avatarUrl    String?    @map("avatar_url")
   status       UserStatus @default(active)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
 
   roles             UserRole[]
   refreshTokens     RefreshToken[]
   projectMembership ProjectMember[]
-  ownedProjects     Project[]          @relation("project_owner")
+  ownedProjects     Project[]        @relation("project_owner")
   taskAssignments   TaskAssignee[]
   taskComments      TaskComment[]
-  auditEntries      AuditLog[]         @relation("audit_actor")
+  auditEntries      AuditLog[]       @relation("audit_actor")
+  timeEntries       TimeEntry[]
+  surveyResponses   SurveyResponse[]
+  projectExpenses   ProjectExpense[]
+  projectNotes      ProjectNote[]
 
   @@map("users")
 }
 
+/// Contador atómico genérico (incrementar dentro de una transacción para
+/// evitar colisiones) — se usa para numeración secuencial tipo "PROY-0001"
+/// o, cuando se implemente el Módulo 3, "C000123" para Casos.
+model Counter {
+  name  String @id
+  value Int    @default(0)
+
+  @@map("counters")
+}
+
 model Role {
-  id          String @id @default(uuid())
-  slug        String @unique // admin_general, direccion_general, direccion_proyectos,
-                              // coordinacion_logistica, coordinacion_comercial,
-                              // coordinacion_recepcion, coordinacion_extraccion,
-                              // coordinador_relevamiento, voluntario
+  id          String           @id @default(uuid())
+  slug        String           @unique // admin_general, direccion_general, direccion_proyectos,
+  // coordinacion_logistica, coordinacion_comercial,
+  // coordinacion_recepcion, coordinacion_extraccion,
+  // coordinador_relevamiento, voluntario
   label       String
-  rank        Int    // menor = más alcance
+  rank        Int // menor = más alcance
   users       UserRole[]
   permissions RolePermission[]
 
@@ -93,14 +107,14 @@ model RolePermission {
 }
 
 model RefreshToken {
-  id         String    @id @default(uuid())
-  userId     String    @map("user_id")
-  tokenHash  String    @map("token_hash")
-  userAgent  String?   @map("user_agent")
-  ip         String?
-  expiresAt  DateTime  @map("expires_at")
-  revokedAt  DateTime? @map("revoked_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @map("token_hash")
+  userAgent String?   @map("user_agent")
+  ip        String?
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -142,18 +156,31 @@ enum ProjectRole {
 
 model Project {
   id          String        @id @default(uuid())
+  code        String        @unique // ej. PROY-0001, vía Counter "project_code"
   name        String
   description String?
   area        String?
   status      ProjectStatus @default(planning)
+  priority    TaskPriority  @default(media)
+  budget      Decimal?      @db.Decimal(12, 2)
+  startDate   DateTime?     @map("start_date")
+  endDate     DateTime?     @map("end_date")
   ownerId     String        @map("owner_id")
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
 
-  owner            User              @relation("project_owner", fields: [ownerId], references: [id])
+  owner            User                @relation("project_owner", fields: [ownerId], references: [id])
   members          ProjectMember[]
   boards           Board[]
   fundTransactions FundTransaction[]
+  cases            ProjectCase[]
+  milestones       ProjectMilestone[]
+  attachments      ProjectAttachment[]
+  labels           ProjectLabel[]
+  processes        ProjectProcess[]
+  expenses         ProjectExpense[]
+  notes            ProjectNote[]
+  settings         ProjectSettings?
 
   @@map("projects")
 }
@@ -170,13 +197,105 @@ model ProjectMember {
   @@map("project_members")
 }
 
+/// Vínculo muchos-a-muchos entre Proyectos y Casos: un proyecto comunitario
+/// (ej. "Comedor de los sábados") puede atender a muchos casos, y un caso
+/// puede estar involucrado en varios proyectos a la vez (vivienda, empleo).
+model ProjectCase {
+  projectId String   @map("project_id")
+  caseId    String   @map("case_id")
+  linkedBy  String   @map("linked_by")
+  linkedAt  DateTime @default(now()) @map("linked_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  case    Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, caseId])
+  @@map("project_cases")
+}
+
+enum MilestoneStatus {
+  pendiente
+  completado
+}
+
+model ProjectMilestone {
+  id          String          @id @default(uuid())
+  projectId   String          @map("project_id")
+  title       String
+  description String?
+  dueDate     DateTime?       @map("due_date")
+  status      MilestoneStatus @default(pendiente)
+  completedAt DateTime?       @map("completed_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_milestones")
+}
+
+model ProjectAttachment {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  fileUrl    String   @map("file_url")
+  fileName   String   @map("file_name")
+  uploadedBy String   @map("uploaded_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_attachments")
+}
+
+/// Etiquetas reutilizables (no texto libre) para filtrar proyectos y tareas.
+model Label {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("#6366F1")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  projects ProjectLabel[]
+  tasks    TaskLabel[]
+
+  @@map("labels")
+}
+
+model ProjectLabel {
+  projectId String @map("project_id")
+  labelId   String @map("label_id")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  label   Label   @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, labelId])
+  @@map("project_labels")
+}
+
+/// "Proceso": agrupador de tareas dentro de un proyecto (ej. "Diagnostico",
+/// "Ejecucion", "Cierre"). Es ortogonal a las columnas del Kanban (Board/
+/// BoardColumn, que reflejan ESTADO: To Do/Doing/Done): un Proceso agrupa
+/// tareas por ETAPA del proyecto y se usa como filtro en el Kanban y como
+/// eje de agrupacion en la vista "Plan" (Gantt).
+model ProjectProcess {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  color     String   @default("#6366F1")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@map("project_processes")
+}
+
 model Board {
   id        String   @id @default(uuid())
   projectId String   @map("project_id")
   name      String
   createdAt DateTime @default(now()) @map("created_at")
 
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   columns BoardColumn[]
 
   @@map("boards")
@@ -201,20 +320,29 @@ enum TaskPriority {
 }
 
 model Task {
-  id            String       @id @default(uuid())
-  boardColumnId String       @map("board_column_id")
-  title         String
-  description   String?
-  priority      TaskPriority @default(media)
-  dueDate       DateTime?    @map("due_date")
-  createdBy     String       @map("created_by")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
+  id               String       @id @default(uuid())
+  boardColumnId    String       @map("board_column_id")
+  title            String
+  description      String?
+  priority         TaskPriority @default(media)
+  startDate        DateTime?    @map("start_date")
+  dueDate          DateTime?    @map("due_date")
+  estimatedMinutes Int?         @map("estimated_minutes")
+  processId        String?      @map("process_id")
+  createdBy        String       @map("created_by")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
 
-  boardColumn BoardColumn      @relation(fields: [boardColumnId], references: [id], onDelete: Cascade)
+  boardColumn BoardColumn         @relation(fields: [boardColumnId], references: [id], onDelete: Cascade)
+  process     ProjectProcess?     @relation(fields: [processId], references: [id], onDelete: SetNull)
   assignees   TaskAssignee[]
   comments    TaskComment[]
   attachments TaskAttachment[]
+  checklist   TaskChecklistItem[]
+  timeEntries TimeEntry[]
+  labels      TaskLabel[]
+  blockerOf   TaskDependency[]    @relation("task_blocker")
+  blockedBy   TaskDependency[]    @relation("task_blocked")
 
   @@map("tasks")
 }
@@ -255,6 +383,277 @@ model TaskAttachment {
   @@map("task_attachments")
 }
 
+model TaskChecklistItem {
+  id        String   @id @default(uuid())
+  taskId    String   @map("task_id")
+  title     String
+  isChecked Boolean  @default(false) @map("is_checked")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_checklist_items")
+}
+
+/// "Esta tarea no puede avanzar hasta que termine la tarea bloqueadora."
+/// Deliberadamente simple (sin tipos de dependencia estilo finish-to-start).
+model TaskDependency {
+  id            String   @id @default(uuid())
+  blockerTaskId String   @map("blocker_task_id")
+  blockedTaskId String   @map("blocked_task_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  blockerTask Task @relation("task_blocker", fields: [blockerTaskId], references: [id], onDelete: Cascade)
+  blockedTask Task @relation("task_blocked", fields: [blockedTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerTaskId, blockedTaskId])
+  @@map("task_dependencies")
+}
+
+model TaskLabel {
+  taskId  String @map("task_id")
+  labelId String @map("label_id")
+
+  task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  label Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, labelId])
+  @@map("task_labels")
+}
+
+/// Cronómetro en vivo (ledger de tramos, nunca un campo "horas actuales"
+/// mutable — mismo criterio que stock/finanzas). Mientras `endedAt` sea
+/// null, el cronómetro está corriendo. Regla de negocio (se aplica en la
+/// capa de servicio, no acá): un usuario solo puede tener UN tramo abierto
+/// a la vez en todo el sistema — arrancar uno nuevo cierra el anterior.
+model TimeEntry {
+  id        String    @id @default(uuid())
+  taskId    String    @map("task_id")
+  userId    String    @map("user_id")
+  startedAt DateTime  @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  note      String?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, endedAt])
+  @@map("time_entries")
+}
+
+// ────────────────────────────────────────────────
+// 2.5 EXTENSIONES GENÉRICAS: CAMPOS PERSONALIZADOS Y ENCUESTAS
+// (aplican a Proyectos y, cuando se implemente, a Casos)
+// ────────────────────────────────────────────────
+
+enum CustomFieldEntity {
+  PROJECT
+  CASE
+}
+
+enum CustomFieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  MULTI_SELECT
+}
+
+/// Definición de un campo extra (EAV simplificado, patrón tomado de RISE
+/// CRM pero tipado): se crea desde un panel de admin, sin migración.
+model CustomFieldDefinition {
+  id          String            @id @default(uuid())
+  entity      CustomFieldEntity
+  label       String
+  fieldType   CustomFieldType   @map("field_type")
+  options     String[] // solo aplica a SELECT / MULTI_SELECT
+  required    Boolean           @default(false)
+  sortOrder   Int               @default(0) @map("sort_order")
+  showInTable Boolean           @default(false) @map("show_in_table")
+  filterable  Boolean           @default(false)
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  values CustomFieldValue[]
+
+  @@map("custom_field_definitions")
+}
+
+model CustomFieldValue {
+  id           String @id @default(uuid())
+  definitionId String @map("definition_id")
+  entityId     String @map("entity_id") // id de Project o Case según definition.entity
+  value        Json
+
+  definition CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  @@unique([definitionId, entityId])
+  @@map("custom_field_values")
+}
+
+enum SurveyEntity {
+  PROJECT
+  CASE
+  STANDALONE
+}
+
+enum SurveyQuestionType {
+  TEXT
+  NUMBER
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  SCALE
+  BOOLEAN
+  DATE
+}
+
+/// Encuestas de uso interno (las responde gente logueada). `entityId` es
+/// polimórfico según `entity` (id de Project o Case), null si es standalone.
+model Survey {
+  id          String       @id @default(uuid())
+  title       String
+  description String?
+  entity      SurveyEntity @default(STANDALONE)
+  entityId    String?      @map("entity_id")
+  createdBy   String       @map("created_by")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  questions SurveyQuestion[]
+  responses SurveyResponse[]
+
+  @@map("surveys")
+}
+
+model SurveyQuestion {
+  id        String             @id @default(uuid())
+  surveyId  String             @map("survey_id")
+  label     String
+  type      SurveyQuestionType
+  options   String[] // aplica a SINGLE_CHOICE / MULTIPLE_CHOICE
+  required  Boolean            @default(false)
+  sortOrder Int                @default(0) @map("sort_order")
+
+  survey  Survey         @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  answers SurveyAnswer[]
+
+  @@map("survey_questions")
+}
+
+model SurveyResponse {
+  id               String   @id @default(uuid())
+  surveyId         String   @map("survey_id")
+  respondentUserId String   @map("respondent_user_id")
+  submittedAt      DateTime @default(now()) @map("submitted_at")
+
+  survey  Survey         @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  user    User           @relation(fields: [respondentUserId], references: [id], onDelete: Cascade)
+  answers SurveyAnswer[]
+
+  @@map("survey_responses")
+}
+
+model SurveyAnswer {
+  id         String @id @default(uuid())
+  responseId String @map("response_id")
+  questionId String @map("question_id")
+  value      Json
+
+  response SurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  question SurveyQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([responseId, questionId])
+  @@map("survey_answers")
+}
+
+// ────────────────────────────────────────────────
+// 2.6 PROYECTOS: EXTENSIONES DE UI (Gastos, Notas, Recordatorios, Config)
+// ────────────────────────────────────────────────
+
+/// Gasto imputado a un proyecto (pestaña "Gastos"). Es un ledger -- cada fila
+/// es un gasto puntual con su propia fecha; nunca se edita un total
+/// acumulado (misma convencion que stock_movements / fund_transactions).
+model ProjectExpense {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  caseId      String?  @map("case_id") // "Cliente": opcional, si el gasto es imputable a un caso puntual
+  memberId    String   @map("member_id") // "Miembro": quien genero el gasto
+  category    String
+  title       String
+  description String?
+  amount      Decimal  @db.Decimal(12, 2)
+  taxAmount   Decimal  @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  expenseDate DateTime @map("expense_date")
+  createdBy   String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  case    Case?   @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  member  User    @relation(fields: [memberId], references: [id])
+
+  @@map("project_expenses")
+}
+
+/// Nota interna de proyecto (pestaña "Notas"): distinta de TaskComment,
+/// vive a nivel proyecto y no cuelga de una tarea puntual.
+model ProjectNote {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  authorId  String   @map("author_id")
+  content   String
+  isPinned  Boolean  @default(false) @map("is_pinned")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@map("project_notes")
+}
+
+enum ReminderEntity {
+  PROJECT
+  TASK
+}
+
+/// Recordatorio generico (proyecto o tarea) -- mismo patron entity+entityId
+/// que CustomFieldValue/Survey, para no tener que crear una tabla nueva por
+/// cada tipo de entidad que necesite recordatorios en el futuro.
+model Reminder {
+  id         String         @id @default(uuid())
+  entity     ReminderEntity
+  entityId   String         @map("entity_id")
+  title      String
+  remindAt   DateTime       @map("remind_at")
+  isDone     Boolean        @default(false) @map("is_done")
+  notifiedAt DateTime?      @map("notified_at")
+  createdBy  String         @map("created_by")
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  @@index([entity, entityId])
+  @@map("reminders")
+}
+
+/// Configuracion por proyecto (pestaña "Configuraciones"). Uno a uno con
+/// Project; "extra" queda como escape hatch para toggles futuros sin
+/// necesitar una migracion nueva por cada uno.
+model ProjectSettings {
+  projectId              String  @id @map("project_id")
+  membersCanTrackTime    Boolean @default(true) @map("members_can_track_time")
+  membersCanLogExpenses  Boolean @default(true) @map("members_can_log_expenses")
+  taskApprovalRequired   Boolean @default(false) @map("task_approval_required")
+  isArchived             Boolean @default(false) @map("is_archived")
+  extra                  Json?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_settings")
+}
+
 // ────────────────────────────────────────────────
 // 3. CRM SOCIAL — MÓDULO "CASOS"
 // ────────────────────────────────────────────────
@@ -283,19 +682,19 @@ enum NeedUrgency {
 }
 
 model Case {
-  id              String     @id @default(uuid())
-  caseNumber      String     @unique @map("case_number") // ej. C000123, vía next_case_number()
-  fullName        String     @map("full_name")
-  alias           String?
-  approxAge       Int?       @map("approx_age")
-  mainPhotoUrl    String?    @map("main_photo_url")
-  healthStatus    String?    @map("health_status")
-  currentSleepSpot String?   @map("current_sleep_spot")
-  status          CaseStatus @default(activo)
-  createdBy       String     @map("created_by")
-  updatedBy       String?    @map("updated_by")
-  createdAt       DateTime   @default(now()) @map("created_at")
-  updatedAt       DateTime   @updatedAt @map("updated_at")
+  id               String     @id @default(uuid())
+  caseNumber       String     @unique @map("case_number") // ej. C000123, vía next_case_number()
+  fullName         String     @map("full_name")
+  alias            String?
+  approxAge        Int?       @map("approx_age")
+  mainPhotoUrl     String?    @map("main_photo_url")
+  healthStatus     String?    @map("health_status")
+  currentSleepSpot String?    @map("current_sleep_spot")
+  status           CaseStatus @default(activo)
+  createdBy        String     @map("created_by")
+  updatedBy        String?    @map("updated_by")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
 
   contactsHistory CaseContactHistory[]
   locations       CaseLocation[]
@@ -304,17 +703,19 @@ model Case {
   needs           CaseNeed[]
   statusHistory   CaseStatusHistory[]
   checkins        Checkin[]
+  projects        ProjectCase[]
+  expenses        ProjectExpense[]
 
   @@map("cases")
 }
 
 model CaseContactHistory {
-  id            String   @id @default(uuid())
-  caseId        String   @map("case_id")
-  userId        String   @map("user_id")
-  notes         String
-  moodObserved  String?  @map("mood_observed")
-  contactedAt   DateTime @default(now()) @map("contacted_at")
+  id           String   @id @default(uuid())
+  caseId       String   @map("case_id")
+  userId       String   @map("user_id")
+  notes        String
+  moodObserved String?  @map("mood_observed")
+  contactedAt  DateTime @default(now()) @map("contacted_at")
 
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
@@ -350,10 +751,10 @@ model CasePhoto {
 }
 
 model CaseSkill {
-  id        String  @id @default(uuid())
-  caseId    String  @map("case_id")
-  skillLabel String @map("skill_label")
-  level     String?
+  id         String  @id @default(uuid())
+  caseId     String  @map("case_id")
+  skillLabel String  @map("skill_label")
+  level      String?
 
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
@@ -375,12 +776,12 @@ model CaseNeed {
 }
 
 model CaseStatusHistory {
-  id        String     @id @default(uuid())
-  caseId    String     @map("case_id")
+  id         String      @id @default(uuid())
+  caseId     String      @map("case_id")
   fromStatus CaseStatus? @map("from_status")
-  toStatus  CaseStatus @map("to_status")
-  changedBy String     @map("changed_by")
-  changedAt DateTime   @default(now()) @map("changed_at")
+  toStatus   CaseStatus  @map("to_status")
+  changedBy  String      @map("changed_by")
+  changedAt  DateTime    @default(now()) @map("changed_at")
 
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
@@ -395,7 +796,7 @@ model DonorInKind {
   id      String  @id @default(uuid())
   name    String
   contact String?
-  type    String  // individuo | empresa
+  type    String // individuo | empresa
 
   intakes DonationIntake[]
 
@@ -403,14 +804,14 @@ model DonorInKind {
 }
 
 model DonationIntake {
-  id               String   @id @default(uuid())
-  donorId          String?  @map("donor_id")
-  receivedBy       String   @map("received_by") // recolector
-  itemDescription  String   @map("item_description")
-  quantity         Decimal
-  unit             String
-  destinationNote  String?  @map("destination_note")
-  receivedAt       DateTime @default(now()) @map("received_at")
+  id              String   @id @default(uuid())
+  donorId         String?  @map("donor_id")
+  receivedBy      String   @map("received_by") // recolector
+  itemDescription String   @map("item_description")
+  quantity        Decimal
+  unit            String
+  destinationNote String?  @map("destination_note")
+  receivedAt      DateTime @default(now()) @map("received_at")
 
   donor DonorInKind? @relation(fields: [donorId], references: [id], onDelete: SetNull)
 
@@ -418,7 +819,7 @@ model DonationIntake {
 }
 
 model StockItem {
-  id            String  @id @default(uuid())
+  id            String   @id @default(uuid())
   name          String
   unit          String
   category      String?
@@ -436,15 +837,15 @@ enum MovementType {
 }
 
 model StockMovement {
-  id               String       @id @default(uuid())
-  stockItemId      String       @map("stock_item_id")
-  type             MovementType
-  quantity         Decimal
-  reason           String?
-  relatedEntityType String?     @map("related_entity_type") // "kitchen_batch" | "field_delivery" | ...
-  relatedEntityId  String?      @map("related_entity_id")
-  createdBy        String       @map("created_by")
-  createdAt        DateTime     @default(now()) @map("created_at")
+  id                String       @id @default(uuid())
+  stockItemId       String       @map("stock_item_id")
+  type              MovementType
+  quantity          Decimal
+  reason            String?
+  relatedEntityType String?      @map("related_entity_type") // "kitchen_batch" | "field_delivery" | ...
+  relatedEntityId   String?      @map("related_entity_id")
+  createdBy         String       @map("created_by")
+  createdAt         DateTime     @default(now()) @map("created_at")
 
   stockItem StockItem @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
 
@@ -476,8 +877,8 @@ model KitchenBatch {
 }
 
 model KitchenBatchIngredient {
-  batchId         String  @map("batch_id")
-  stockItemId     String  @map("stock_item_id")
+  batchId          String  @map("batch_id")
+  stockItemId      String  @map("stock_item_id")
   quantityAssigned Decimal @map("quantity_assigned")
 
   batch     KitchenBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
@@ -515,7 +916,7 @@ model KitchenBatchStatusHistory {
 // ────────────────────────────────────────────────
 
 model FieldTeam {
-  id           String @id @default(uuid())
+  id           String  @id @default(uuid())
   name         String
   vehicleLabel String? @map("vehicle_label")
 
@@ -537,8 +938,8 @@ model FieldTeamMember {
 }
 
 model Zone {
-  id      String  @id @default(uuid())
-  name    String
+  id   String @id @default(uuid())
+  name String
   // El polígono real se define en la migración SQL como
   // `geography(Polygon,4326)`; acá se referencia solo el id/nombre.
 
@@ -578,9 +979,9 @@ model Checkin {
   lng            Float
   createdAt      DateTime    @default(now()) @map("created_at")
 
-  team         FieldTeam?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  case         Case?         @relation(fields: [caseId], references: [id], onDelete: SetNull)
-  kitchenBatch KitchenBatch? @relation(fields: [kitchenBatchId], references: [id], onDelete: SetNull)
+  team         FieldTeam?      @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  case         Case?           @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  kitchenBatch KitchenBatch?   @relation(fields: [kitchenBatchId], references: [id], onDelete: SetNull)
   deliveries   FieldDelivery[]
 
   @@map("checkins")
@@ -603,11 +1004,11 @@ model FieldDelivery {
 
 model Lead {
   id                String   @id @default(uuid())
-  type              String   // donante | empresa | voluntario
+  type              String // donante | empresa | voluntario
   name              String
   email             String?
   phone             String?
-  source            String?  // formulario web, campaña, etc.
+  source            String? // formulario web, campaña, etc.
   payload           Json?
   convertedToUserId String?  @map("converted_to_user_id")
   createdAt         DateTime @default(now()) @map("created_at")
@@ -638,19 +1039,19 @@ enum FundMethod {
 }
 
 model FundTransaction {
-  id                  String               @id @default(uuid())
-  type                FundTransactionType
-  method              FundMethod
-  amount              Decimal
-  currency            String               @default("ARS")
-  donorId             String?              @map("donor_id")
-  originNote          String?              @map("origin_note")
+  id                   String              @id @default(uuid())
+  type                 FundTransactionType
+  method               FundMethod
+  amount               Decimal
+  currency             String              @default("ARS")
+  donorId              String?             @map("donor_id")
+  originNote           String?             @map("origin_note")
   destinationProjectId String?             @map("destination_project_id")
-  executedBy          String               @map("executed_by")
-  occurredAt          DateTime             @default(now()) @map("occurred_at")
+  executedBy           String              @map("executed_by")
+  occurredAt           DateTime            @default(now()) @map("occurred_at")
 
-  donor             DonorMonetary? @relation(fields: [donorId], references: [id], onDelete: SetNull)
-  destinationProject Project?      @relation(fields: [destinationProjectId], references: [id], onDelete: SetNull)
+  donor              DonorMonetary? @relation(fields: [donorId], references: [id], onDelete: SetNull)
+  destinationProject Project?       @relation(fields: [destinationProjectId], references: [id], onDelete: SetNull)
 
   @@map("fund_transactions")
 }

@@ -2,6 +2,15 @@
  * Catálogo de permisos granulares y la matriz rol → permisos.
  * Fuente de verdad para el seed (prisma/seed.ts) y para el middleware de
  * autorización. Cambiar acá y correr `pnpm prisma:seed` para propagar.
+ *
+ * Nota sobre el Módulo 2 (Proyectos) ampliado: los subsistemas nuevos
+ * (hitos, cronómetro/TimeEntry, checklist, dependencias, adjuntos,
+ * etiquetas, procesos, gastos, notas, recordatorios, campos personalizados
+ * y encuestas ATADAS a un proyecto) NO tienen slug propio acá — viven
+ * dentro del alcance de "projects.read/write/admin" y se afinan por
+ * miembro con `ProjectRole` (creador/editor/visor/admin en `ProjectMember`,
+ * chequeado en la capa de servicio, no acá). Solo se agregó un slug nuevo,
+ * `surveys.manage`, para encuestas STANDALONE (no atadas a un proyecto).
  */
 
 export const PERMISSIONS = [
@@ -24,6 +33,8 @@ export const PERMISSIONS = [
   // Finanzas / donaciones
   "finance.read",
   "finance.write",
+  // Encuestas internas (standalone, no atadas a un proyecto puntual)
+  "surveys.manage",
   // Analítica
   "analytics.read",
 ] as const
@@ -81,9 +92,16 @@ export const ROLE_PERMISSIONS: Record<Exclude<GlobalRoleSlug, "admin_general">, 
     "logistics.read",
     "field_ops.read",
     "finance.read",
+    "surveys.manage",
     "analytics.read",
   ],
-  direccion_proyectos: ["projects.read", "projects.write", "projects.admin", "analytics.read"],
+  direccion_proyectos: [
+    "projects.read",
+    "projects.write",
+    "projects.admin",
+    "surveys.manage",
+    "analytics.read",
+  ],
   coordinacion_logistica: ["logistics.read", "logistics.write", "field_ops.read"],
   coordinacion_comercial: ["finance.read", "finance.write"],
   coordinacion_recepcion: ["cases.read", "cases.write"],
