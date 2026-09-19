@@ -3,6 +3,28 @@ import { z, ZodError } from "zod"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
 import * as service from "./projects.service"
 import { BusinessRuleError } from "./projects.service"
+import {
+  canSeeAllProjects,
+  fromBoardColumnBody,
+  fromChecklistItemIdParam,
+  fromDependencyIdParam,
+  fromExpenseIdParam,
+  fromMilestoneIdParam,
+  fromNoteIdParam,
+  fromProcessIdParam,
+  fromProjectAttachmentIdParam,
+  fromProjectIdParam,
+  fromReminderBody,
+  fromReminderIdParam,
+  fromReminderQuery,
+  fromTaskAttachmentIdParam,
+  fromTaskIdParam,
+  fromTimeEntryIdParam,
+  guardCustomFieldValue,
+  requireProjectAdmin,
+  requireProjectRead,
+  requireProjectWrite,
+} from "./project-access"
 
 // ── Schemas ──
 
@@ -171,8 +193,8 @@ export async function projectsRoutes(app: FastifyInstance) {
   })
 
   // ── Proyectos ──
-  app.get("/projects", { preHandler: [requireAuth, requirePermission("projects.read")] }, async () => {
-    return service.listProjects()
+  app.get("/projects", { preHandler: [requireAuth] }, async (request) => {
+    return service.listProjects({ userId: request.user!.sub, seeAll: canSeeAllProjects(request) })
   })
 
   app.post("/projects", { preHandler: [requireAuth, requirePermission("projects.write")] }, async (request, reply) => {
@@ -188,7 +210,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.get(
     "/projects/:id",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const project = await service.getProjectDetail(id)
@@ -197,7 +219,7 @@ export async function projectsRoutes(app: FastifyInstance) {
     },
   )
 
-  app.patch("/projects/:id", { preHandler: [requireAuth, requirePermission("projects.write")] }, async (request) => {
+  app.patch("/projects/:id", { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] }, async (request) => {
     const { id } = request.params as { id: string }
     const body = updateProjectSchema.parse(request.body)
     return service.updateProject(id, {
@@ -209,7 +231,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/projects/:id",
-    { preHandler: [requireAuth, requirePermission("projects.admin")] },
+    { preHandler: [requireAuth, requireProjectAdmin(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       await service.deleteProject(id)
@@ -220,7 +242,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Miembros ──
   app.post(
     "/projects/:id/members",
-    { preHandler: [requireAuth, requirePermission("projects.admin")] },
+    { preHandler: [requireAuth, requireProjectAdmin(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = memberSchema.parse(request.body)
@@ -231,7 +253,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/projects/:id/members/:userId",
-    { preHandler: [requireAuth, requirePermission("projects.admin")] },
+    { preHandler: [requireAuth, requireProjectAdmin(fromProjectIdParam)] },
     async (request, reply) => {
       const { id, userId } = request.params as { id: string; userId: string }
       await service.removeProjectMember(id, userId)
@@ -242,7 +264,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Proyecto ↔ Caso ──
   app.get(
     "/projects/:id/cases",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listProjectCases(id)
@@ -251,7 +273,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/projects/:id/cases",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = caseLinkSchema.parse(request.body)
@@ -262,7 +284,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/projects/:id/cases/:caseId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id, caseId } = request.params as { id: string; caseId: string }
       await service.unlinkCase(id, caseId)
@@ -273,7 +295,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Hitos ──
   app.get(
     "/projects/:id/milestones",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listMilestones(id)
@@ -282,7 +304,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/projects/:id/milestones",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = milestoneSchema.parse(request.body)
@@ -296,7 +318,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.patch(
     "/milestones/:milestoneId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromMilestoneIdParam)] },
     async (request) => {
       const { milestoneId } = request.params as { milestoneId: string }
       const body = updateMilestoneSchema.parse(request.body)
@@ -309,7 +331,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/milestones/:milestoneId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromMilestoneIdParam)] },
     async (request, reply) => {
       const { milestoneId } = request.params as { milestoneId: string }
       await service.deleteMilestone(milestoneId)
@@ -320,7 +342,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Procesos ──
   app.get(
     "/projects/:id/processes",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listProcesses(id)
@@ -329,7 +351,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/projects/:id/processes",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = processSchema.parse(request.body)
@@ -340,7 +362,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.patch(
     "/processes/:processId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProcessIdParam)] },
     async (request) => {
       const { processId } = request.params as { processId: string }
       const body = updateProcessSchema.parse(request.body)
@@ -350,7 +372,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/processes/:processId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProcessIdParam)] },
     async (request, reply) => {
       const { processId } = request.params as { processId: string }
       await service.deleteProcess(processId)
@@ -360,7 +382,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.get(
     "/projects/:id/plan",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.getProjectPlan(id)
@@ -370,7 +392,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Archivos de proyecto ──
   app.get(
     "/projects/:id/attachments",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listProjectAttachments(id)
@@ -379,7 +401,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/projects/:id/attachments",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = attachmentSchema.parse(request.body)
@@ -390,7 +412,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/attachments/:attachmentId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectAttachmentIdParam)] },
     async (request, reply) => {
       const { attachmentId } = request.params as { attachmentId: string }
       await service.deleteProjectAttachment(attachmentId)
@@ -399,7 +421,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   )
 
   // ── Etiquetas ──
-  app.get("/labels", { preHandler: [requireAuth, requirePermission("projects.read")] }, async () => {
+  app.get("/labels", { preHandler: [requireAuth] }, async () => {
     return service.listLabels()
   })
 
@@ -431,7 +453,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/projects/:id/labels",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = labelIdSchema.parse(request.body)
@@ -442,7 +464,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/projects/:id/labels/:labelId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id, labelId } = request.params as { id: string; labelId: string }
       await service.detachProjectLabel(id, labelId)
@@ -452,7 +474,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/tasks/:id/labels",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = labelIdSchema.parse(request.body)
@@ -463,7 +485,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/tasks/:id/labels/:labelId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id, labelId } = request.params as { id: string; labelId: string }
       await service.detachTaskLabel(id, labelId)
@@ -474,14 +496,14 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Tareas ──
   app.get(
     "/projects/:id/tasks",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listProjectTasks(id)
     },
   )
 
-  app.post("/tasks", { preHandler: [requireAuth, requirePermission("projects.write")] }, async (request, reply) => {
+  app.post("/tasks", { preHandler: [requireAuth, requireProjectWrite(fromBoardColumnBody)] }, async (request, reply) => {
     const body = createTaskSchema.parse(request.body)
     const task = await service.createTask({
       ...body,
@@ -494,7 +516,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.get(
     "/tasks/:id",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const task = await service.getTaskDetail(id)
@@ -503,7 +525,7 @@ export async function projectsRoutes(app: FastifyInstance) {
     },
   )
 
-  app.patch("/tasks/:id", { preHandler: [requireAuth, requirePermission("projects.write")] }, async (request) => {
+  app.patch("/tasks/:id", { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] }, async (request) => {
     const { id } = request.params as { id: string }
     const body = updateTaskSchema.parse(request.body)
     return service.updateTask(id, {
@@ -515,7 +537,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/tasks/:id",
-    { preHandler: [requireAuth, requirePermission("projects.admin")] },
+    { preHandler: [requireAuth, requireProjectAdmin(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       await service.deleteTask(id)
@@ -525,7 +547,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/tasks/:id/assignees",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = assigneeSchema.parse(request.body)
@@ -536,7 +558,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/tasks/:id/assignees/:userId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id, userId } = request.params as { id: string; userId: string }
       await service.unassignTask(id, userId)
@@ -546,7 +568,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/tasks/:id/comments",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = commentSchema.parse(request.body)
@@ -557,7 +579,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/tasks/:id/attachments",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = taskAttachmentSchema.parse(request.body)
@@ -568,7 +590,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/task-attachments/:attachmentId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskAttachmentIdParam)] },
     async (request, reply) => {
       const { attachmentId } = request.params as { attachmentId: string }
       await service.deleteTaskAttachment(attachmentId)
@@ -579,7 +601,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Checklist ──
   app.post(
     "/tasks/:id/checklist",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = checklistItemSchema.parse(request.body)
@@ -590,7 +612,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.patch(
     "/checklist/:itemId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromChecklistItemIdParam)] },
     async (request) => {
       const { itemId } = request.params as { itemId: string }
       const body = updateChecklistItemSchema.parse(request.body)
@@ -600,7 +622,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/checklist/:itemId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromChecklistItemIdParam)] },
     async (request, reply) => {
       const { itemId } = request.params as { itemId: string }
       await service.deleteChecklistItem(itemId)
@@ -611,7 +633,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Dependencias ──
   app.post(
     "/tasks/:id/dependencies",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = dependencySchema.parse(request.body)
@@ -622,7 +644,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/dependencies/:depId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromDependencyIdParam)] },
     async (request, reply) => {
       const { depId } = request.params as { depId: string }
       await service.removeTaskDependency(depId)
@@ -633,7 +655,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Cronómetro (Hoja de Tiempo) ──
   app.get(
     "/timer/running",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth] },
     async (request) => {
       return service.getRunningTimer(request.user!.sub)
     },
@@ -641,7 +663,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/tasks/:id/timer/start",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromTaskIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = startTimerSchema.parse(request.body ?? {})
@@ -652,7 +674,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/timer/:entryId/stop",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectRead(fromTimeEntryIdParam)] },
     async (request) => {
       const { entryId } = request.params as { entryId: string }
       return service.stopTimer(entryId, request.user!.sub)
@@ -661,7 +683,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.get(
     "/tasks/:id/time-entries",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromTaskIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listTaskTimeEntries(id)
@@ -670,7 +692,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.get(
     "/projects/:id/time-entries",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listProjectTimeEntries(id)
@@ -719,7 +741,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.get(
     "/projects/:id/custom-field-values",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.getCustomFieldValues("PROJECT", id)
@@ -728,7 +750,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.put(
     "/custom-fields/:defId/values/:entityId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [guardCustomFieldValue] },
     async (request) => {
       const { defId, entityId } = request.params as { defId: string; entityId: string }
       const body = customFieldValueSchema.parse(request.body)
@@ -752,7 +774,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.get(
     "/surveys/:id",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const survey = await service.getSurveyDetail(id)
@@ -794,7 +816,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/surveys/:id/responses",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = surveyResponseSchema.parse(request.body)
@@ -815,7 +837,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Gastos ──
   app.get(
     "/projects/:id/expenses",
-    { preHandler: [requireAuth, requirePermission("finance.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam, ["finance.read"])] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listProjectExpenses(id)
@@ -824,7 +846,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/projects/:id/expenses",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = expenseSchema.parse(request.body)
@@ -839,7 +861,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.patch(
     "/expenses/:expenseId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromExpenseIdParam)] },
     async (request) => {
       const { expenseId } = request.params as { expenseId: string }
       const body = updateExpenseSchema.parse(request.body)
@@ -852,7 +874,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/expenses/:expenseId",
-    { preHandler: [requireAuth, requirePermission("projects.admin")] },
+    { preHandler: [requireAuth, requireProjectAdmin(fromExpenseIdParam)] },
     async (request, reply) => {
       const { expenseId } = request.params as { expenseId: string }
       await service.deleteProjectExpense(expenseId)
@@ -863,7 +885,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Notas ──
   app.get(
     "/projects/:id/notes",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.listProjectNotes(id)
@@ -872,7 +894,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/projects/:id/notes",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromProjectIdParam)] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = noteSchema.parse(request.body)
@@ -883,7 +905,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.patch(
     "/notes/:noteId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromNoteIdParam)] },
     async (request) => {
       const { noteId } = request.params as { noteId: string }
       const body = updateNoteSchema.parse(request.body)
@@ -893,7 +915,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/notes/:noteId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromNoteIdParam)] },
     async (request, reply) => {
       const { noteId } = request.params as { noteId: string }
       await service.deleteProjectNote(noteId)
@@ -904,7 +926,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Recordatorios ──
   app.get(
     "/reminders",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth, requireProjectRead(fromReminderQuery)] },
     async (request) => {
       const { entity, entityId } = request.query as { entity: string; entityId: string }
       return service.listReminders(reminderEntityEnum.parse(entity), entityId)
@@ -913,7 +935,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/reminders",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromReminderBody)] },
     async (request, reply) => {
       const body = z
         .object({ entity: reminderEntityEnum, entityId: z.string().uuid() })
@@ -930,7 +952,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.post(
     "/reminders/:reminderId/done",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromReminderIdParam)] },
     async (request) => {
       const { reminderId } = request.params as { reminderId: string }
       return service.markReminderDone(reminderId)
@@ -939,7 +961,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.delete(
     "/reminders/:reminderId",
-    { preHandler: [requireAuth, requirePermission("projects.write")] },
+    { preHandler: [requireAuth, requireProjectWrite(fromReminderIdParam)] },
     async (request, reply) => {
       const { reminderId } = request.params as { reminderId: string }
       await service.deleteReminder(reminderId)
@@ -950,7 +972,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Configuración de proyecto ──
   app.get(
     "/projects/:id/settings",
-    { preHandler: [requireAuth, requirePermission("projects.admin")] },
+    { preHandler: [requireAuth, requireProjectAdmin(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       return service.getProjectSettings(id)
@@ -959,7 +981,7 @@ export async function projectsRoutes(app: FastifyInstance) {
 
   app.patch(
     "/projects/:id/settings",
-    { preHandler: [requireAuth, requirePermission("projects.admin")] },
+    { preHandler: [requireAuth, requireProjectAdmin(fromProjectIdParam)] },
     async (request) => {
       const { id } = request.params as { id: string }
       const body = settingsSchema.parse(request.body)
@@ -970,7 +992,7 @@ export async function projectsRoutes(app: FastifyInstance) {
   // ── Resumen para el dashboard ──
   app.get(
     "/dashboard/summary",
-    { preHandler: [requireAuth, requirePermission("projects.read")] },
+    { preHandler: [requireAuth] },
     async (request) => {
       return service.getDashboardSummary(request.user!.sub)
     },

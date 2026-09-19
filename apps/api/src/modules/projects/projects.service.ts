@@ -44,8 +44,15 @@ async function nextProjectCode(): Promise<string> {
 // Proyectos — CRUD + listado para la tabla
 // ────────────────────────────────────────────────
 
-export async function listProjects() {
+/**
+ * `seeAll`: true para quien tiene permiso global projects.read/write/admin
+ * (dirección) — ve TODO el módulo. Si no, solo ve los proyectos de los que
+ * es `ProjectMember` (voluntarios/coordinadores asignados a proyectos
+ * puntuales, sin visión de organización completa).
+ */
+export async function listProjects(opts: { userId: string; seeAll: boolean }) {
   const projects = await prisma.project.findMany({
+    where: opts.seeAll ? undefined : { members: { some: { userId: opts.userId } } },
     orderBy: { createdAt: "desc" },
     include: {
       members: { select: { userId: true } },
