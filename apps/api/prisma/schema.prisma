@@ -642,12 +642,12 @@ model Reminder {
 /// Project; "extra" queda como escape hatch para toggles futuros sin
 /// necesitar una migracion nueva por cada uno.
 model ProjectSettings {
-  projectId              String  @id @map("project_id")
-  membersCanTrackTime    Boolean @default(true) @map("members_can_track_time")
-  membersCanLogExpenses  Boolean @default(true) @map("members_can_log_expenses")
-  taskApprovalRequired   Boolean @default(false) @map("task_approval_required")
-  isArchived             Boolean @default(false) @map("is_archived")
-  extra                  Json?
+  projectId             String  @id @map("project_id")
+  membersCanTrackTime   Boolean @default(true) @map("members_can_track_time")
+  membersCanLogExpenses Boolean @default(true) @map("members_can_log_expenses")
+  taskApprovalRequired  Boolean @default(false) @map("task_approval_required")
+  isArchived            Boolean @default(false) @map("is_archived")
+  extra                 Json?
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
@@ -681,9 +681,38 @@ enum NeedUrgency {
   normal
 }
 
+// Fase J — campos de relevamiento móvil (reemplazo de la planilla en
+// papel). Se agregan como columnas nuevas y opcionales sobre Case en vez
+// de modelar tablas aparte porque son atributos propios de identidad/
+// diagnóstico de LA persona, no eventos repetibles — lo que sí es
+// repetible (necesidades, habilidades, fotos, ubicaciones, contactos) ya
+// tenía su propia tabla desde antes y se reusa tal cual.
+enum CaseType {
+  individual
+  pareja
+  grupo_familiar
+}
+
+enum StayType {
+  calle
+  parador_temporal
+}
+
+enum CaseViability {
+  alta
+  media
+  baja
+}
+
+enum CaseFeasibility {
+  factible
+  no_factible
+  en_pausa
+}
+
 model Case {
   id               String     @id @default(uuid())
-  caseNumber       String     @unique @map("case_number") // ej. C000123, vía next_case_number()
+  caseNumber       String     @unique @map("case_number") // ej. C000123, asignado por Counter en el service
   fullName         String     @map("full_name")
   alias            String?
   approxAge        Int?       @map("approx_age")
@@ -695,6 +724,21 @@ model Case {
   updatedBy        String?    @map("updated_by")
   createdAt        DateTime   @default(now()) @map("created_at")
   updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  // Relevamiento móvil (Fase J)
+  caseType        CaseType         @default(individual) @map("case_type")
+  dni             String?
+  sex             String?
+  phone           String?
+  dayZone         String?          @map("day_zone") // zona habitual de circulación diurna; currentSleepSpot ya cubre dónde duerme
+  stayType        StayType?        @map("stay_type")
+  wantsToWork     Boolean?         @map("wants_to_work")
+  workAptitude    String?          @map("work_aptitude")
+  legalSituation  String?          @map("legal_situation")
+  substanceUse    String?          @map("substance_use")
+  viability       CaseViability?
+  feasibility     CaseFeasibility?
+  closeReason     String?          @map("close_reason")
 
   contactsHistory CaseContactHistory[]
   locations       CaseLocation[]
