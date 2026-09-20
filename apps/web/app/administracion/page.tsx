@@ -7,8 +7,9 @@ import { fetchMe, hasPermission, type SessionUser } from "../../lib/auth"
 import { Etiquetas } from "./tabs/Etiquetas"
 import { CamposPersonalizados } from "./tabs/CamposPersonalizados"
 import { Encuestas } from "./tabs/Encuestas"
+import { Usuarios } from "./tabs/Usuarios"
 
-type TabKey = "etiquetas" | "campos" | "encuestas"
+type TabKey = "usuarios" | "etiquetas" | "campos" | "encuestas"
 
 /**
  * Fase G — pantallas de administración. A diferencia de la página de un
@@ -23,7 +24,7 @@ type TabKey = "etiquetas" | "campos" | "encuestas"
 export default function AdministracionPage() {
   const router = useRouter()
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined)
-  const [activeTab, setActiveTab] = useState<TabKey>("etiquetas")
+  const [activeTab, setActiveTab] = useState<TabKey>("usuarios")
 
   useEffect(() => {
     fetchMe().then((u) => {
@@ -38,8 +39,9 @@ export default function AdministracionPage() {
 
   const canAdmin = hasPermission(user, "projects.admin")
   const canSurveys = hasPermission(user, "surveys.manage")
+  const canUsers = hasPermission(user, "users.manage")
 
-  if (!canAdmin && !canSurveys) {
+  if (!canAdmin && !canSurveys && !canUsers) {
     return (
       <main className="min-h-screen px-4 py-10 sm:px-6">
         <p className="text-sm text-cream/60">No tenés permiso para ver esta sección.</p>
@@ -51,6 +53,7 @@ export default function AdministracionPage() {
   }
 
   const TABS: { key: TabKey; label: string; visible: boolean }[] = [
+    { key: "usuarios", label: "Usuarios", visible: canUsers },
     { key: "etiquetas", label: "Etiquetas", visible: canAdmin },
     { key: "campos", label: "Campos Personalizados", visible: canAdmin },
     { key: "encuestas", label: "Encuestas", visible: canSurveys },
@@ -84,6 +87,7 @@ export default function AdministracionPage() {
         ))}
       </nav>
 
+      {currentTab === "usuarios" && <Usuarios currentUserId={user!.id} />}
       {currentTab === "etiquetas" && <Etiquetas />}
       {currentTab === "campos" && <CamposPersonalizados />}
       {currentTab === "encuestas" && <Encuestas currentUserId={user!.id} />}
