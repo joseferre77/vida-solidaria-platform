@@ -147,7 +147,7 @@ export default function DashboardPage() {
           <NavCard label="Proyectos" href="/proyectos" />
         </RoleGate>
         <RoleGate user={user ?? null} permission="cases.read">
-          <NavCard label="Casos" disabled />
+          <NavCard label="Casos" href="/casos" />
         </RoleGate>
         <RoleGate user={user ?? null} permission="logistics.read">
           <NavCard label="Logística" disabled />

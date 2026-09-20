@@ -1,0 +1,269 @@
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"
+
+async function apiFetch(path: string, init?: RequestInit) {
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? `Error ${res.status}`)
+  }
+  if (res.status === 204) return null
+  return res.json()
+}
+
+/**
+ * Sube un archivo real a POST /api/uploads (multipart/form-data), igual
+ * que en projects.ts — se repite acá para no acoplar el módulo de Casos
+ * al de Proyectos.
+ */
+export async function uploadCaseFile(file: File): Promise<{ fileUrl: string; fileName: string }> {
+  const formData = new FormData()
+  formData.append("file", file)
+  const res = await fetch(`${API_URL}/api/uploads`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? `Error ${res.status}`)
+  }
+  return res.json()
+}
+
+export const CASE_TYPES = ["individual", "pareja", "grupo_familiar"] as const
+export const STAY_TYPES = ["calle", "parador_temporal"] as const
+export const VIABILITIES = ["alta", "media", "baja"] as const
+export const FEASIBILITIES = ["factible", "no_factible", "en_pausa"] as const
+export const CASE_STATUSES = ["activo", "en_seguimiento", "derivado", "cerrado"] as const
+export const NEED_CATEGORIES = [
+  "salud",
+  "documentacion",
+  "abrigo",
+  "alimentacion",
+  "vivienda",
+  "laboral",
+  "otro",
+] as const
+export const NEED_URGENCIES = ["inmediata", "urgente", "normal"] as const
+
+export type CaseType = (typeof CASE_TYPES)[number]
+export type StayType = (typeof STAY_TYPES)[number]
+export type CaseViability = (typeof VIABILITIES)[number]
+export type CaseFeasibility = (typeof FEASIBILITIES)[number]
+export type CaseStatus = (typeof CASE_STATUSES)[number]
+export type NeedCategory = (typeof NEED_CATEGORIES)[number]
+export type NeedUrgency = (typeof NEED_URGENCIES)[number]
+
+export const CASE_TYPE_LABEL: Record<CaseType, string> = {
+  individual: "Persona sola",
+  pareja: "Pareja",
+  grupo_familiar: "Grupo familiar",
+}
+
+export const STAY_TYPE_LABEL: Record<StayType, string> = {
+  calle: "En situación de calle",
+  parador_temporal: "Parador / albergue temporal",
+}
+
+export const VIABILITY_LABEL: Record<CaseViability, string> = { alta: "Alta", media: "Media", baja: "Baja" }
+export const FEASIBILITY_LABEL: Record<CaseFeasibility, string> = {
+  factible: "Factible",
+  no_factible: "No factible",
+  en_pausa: "En pausa",
+}
+export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
+  activo: "Activo",
+  en_seguimiento: "En seguimiento",
+  derivado: "Derivado",
+  cerrado: "Cerrado",
+}
+export const NEED_CATEGORY_LABEL: Record<NeedCategory, string> = {
+  salud: "Salud",
+  documentacion: "Documentación",
+  abrigo: "Abrigo",
+  alimentacion: "Alimentación",
+  vivienda: "Vivienda",
+  laboral: "Laboral",
+  otro: "Otro",
+}
+export const NEED_URGENCY_LABEL: Record<NeedUrgency, string> = {
+  inmediata: "Inmediata",
+  urgente: "Urgente",
+  normal: "Normal",
+}
+
+export interface BasicUser {
+  id: string
+  name: string
+  email: string
+}
+
+export interface CaseListItem {
+  id: string
+  caseNumber: string
+  fullName: string
+  alias: string | null
+  approxAge: number | null
+  mainPhotoUrl: string | null
+  status: CaseStatus
+  caseType: CaseType
+  viability: CaseViability | null
+  feasibility: CaseFeasibility | null
+  createdAt: string
+  openNeedsCount: number
+}
+
+export interface CaseNeedItem {
+  id: string
+  category: NeedCategory
+  urgency: NeedUrgency
+  notes: string | null
+  resolvedAt: string | null
+  createdAt: string
+}
+
+export interface CaseSkillItem {
+  id: string
+  skillLabel: string
+  level: string | null
+}
+
+export interface CaseContactItem {
+  id: string
+  notes: string
+  moodObserved: string | null
+  contactedAt: string
+  user: BasicUser | null
+}
+
+export interface CaseLocationItem {
+  id: string
+  lat: number
+  lng: number
+  recordedAt: string
+  recordedBy: BasicUser | null
+}
+
+export interface CasePhotoItem {
+  id: string
+  url: string
+  takenAt: string
+  uploadedBy: BasicUser | null
+}
+
+export interface CaseStatusHistoryItem {
+  toStatus: CaseStatus
+  fromStatus: CaseStatus | null
+  changedAt: string
+  changedBy: BasicUser | null
+}
+
+export interface CaseDetail {
+  id: string
+  caseNumber: string
+  fullName: string
+  alias: string | null
+  approxAge: number | null
+  mainPhotoUrl: string | null
+  healthStatus: string | null
+  currentSleepSpot: string | null
+  status: CaseStatus
+  caseType: CaseType
+  dni: string | null
+  sex: string | null
+  phone: string | null
+  dayZone: string | null
+  stayType: StayType | null
+  wantsToWork: boolean | null
+  workAptitude: string | null
+  legalSituation: string | null
+  substanceUse: string | null
+  viability: CaseViability | null
+  feasibility: CaseFeasibility | null
+  closeReason: string | null
+  createdAt: string
+  createdBy: BasicUser | null
+  updatedBy: BasicUser | null
+  contactsHistory: CaseContactItem[]
+  locations: CaseLocationItem[]
+  photos: CasePhotoItem[]
+  skills: CaseSkillItem[]
+  needs: CaseNeedItem[]
+  statusHistory: CaseStatusHistoryItem[]
+}
+
+export const listCases = (status?: CaseStatus) =>
+  apiFetch(`/api/cases${status ? `?status=${status}` : ""}`) as Promise<CaseListItem[]>
+
+export const getCase = (id: string) => apiFetch(`/api/cases/${id}`) as Promise<CaseDetail>
+
+export interface CreateCaseInput {
+  fullName: string
+  alias?: string
+  approxAge?: number
+  caseType: CaseType
+  dni?: string
+  sex?: string
+  phone?: string
+  healthStatus?: string
+  currentSleepSpot?: string
+  dayZone?: string
+  stayType?: StayType
+  wantsToWork?: boolean
+  workAptitude?: string
+  legalSituation?: string
+  substanceUse?: string
+  mainPhotoUrl?: string
+  location: { lat: number; lng: number }
+  needs?: { category: NeedCategory; urgency: NeedUrgency; notes?: string }[]
+  skills?: { skillLabel: string; level?: string }[]
+  photoUrls?: string[]
+}
+
+export const createCase = (data: CreateCaseInput) =>
+  apiFetch("/api/cases", { method: "POST", body: JSON.stringify(data) }) as Promise<CaseDetail>
+
+export const updateCase = (
+  id: string,
+  data: Partial<
+    Omit<CreateCaseInput, "location" | "needs" | "skills" | "photoUrls" | "caseType"> & {
+      caseType: CaseType
+      viability: CaseViability | null
+      feasibility: CaseFeasibility | null
+    }
+  >,
+) => apiFetch(`/api/cases/${id}`, { method: "PATCH", body: JSON.stringify(data) }) as Promise<CaseDetail>
+
+export const changeCaseStatus = (id: string, status: CaseStatus, closeReason?: string) =>
+  apiFetch(`/api/cases/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status, closeReason }),
+  }) as Promise<CaseDetail>
+
+export const addCaseContact = (id: string, data: { notes: string; moodObserved?: string }) =>
+  apiFetch(`/api/cases/${id}/contacts`, { method: "POST", body: JSON.stringify(data) }) as Promise<CaseDetail>
+
+export const addCaseLocation = (id: string, data: { lat: number; lng: number }) =>
+  apiFetch(`/api/cases/${id}/locations`, { method: "POST", body: JSON.stringify(data) }) as Promise<CaseDetail>
+
+export const addCasePhoto = (id: string, url: string) =>
+  apiFetch(`/api/cases/${id}/photos`, { method: "POST", body: JSON.stringify({ url }) }) as Promise<CaseDetail>
+
+export const addCaseNeed = (id: string, data: { category: NeedCategory; urgency: NeedUrgency; notes?: string }) =>
+  apiFetch(`/api/cases/${id}/needs`, { method: "POST", body: JSON.stringify(data) }) as Promise<CaseDetail>
+
+export const resolveCaseNeed = (id: string, needId: string, resolved: boolean) =>
+  apiFetch(`/api/cases/${id}/needs/${needId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ resolved }),
+  }) as Promise<CaseDetail>
+
+export const addCaseSkill = (id: string, data: { skillLabel: string; level?: string }) =>
+  apiFetch(`/api/cases/${id}/skills`, { method: "POST", body: JSON.stringify(data) }) as Promise<CaseDetail>
+
+export const deleteCaseSkill = (id: string, skillId: string) =>
+  apiFetch(`/api/cases/${id}/skills/${skillId}`, { method: "DELETE" })
