@@ -490,3 +490,55 @@ recursos en su propio pipeline de build, probablemente corre en otra
 máquina), pero si el auto-deploy vuelve a fallar específicamente en el
 build (no en el `npm install`/`.env` de siempre), este es el motivo y el
 watchdog actual no lo cubre — quedaría pendiente adaptarlo.
+
+## Incidente (20 sep 2026): `prisma migrate deploy` tampoco corre en el servidor — mismo límite de LVE, pero en el schema-engine
+
+**Síntoma**: al aplicar la migración de Casos (Fase J) por SSH, `npx prisma
+migrate deploy` fallaba con:
+
+```
+Error: P1001: Can't reach database server at `aws-0-sa-east-1.pooler.supabase.com:5432`
+```
+
+Esto parece un problema de red, pero NO lo es — se confirmó con `openssl
+s_client` y una conexión TCP directa desde Node que el servidor SÍ llega
+sin problema a la base (handshake TLS incluido). El verdadero error
+aparece recién al correr `npx prisma -v`: Prisma necesita spawnear un
+binario aparte (`schema-engine-debian-openssl-1.1.x`) para cualquier
+comando de migración, y ese spawn muere con el mismo `EAGAIN` del
+incidente de `next build` de más arriba — es el mismo límite de
+procesos de la cuenta (LVE), no algo específico de Next.
+
+Importante: esto NO afecta el uso normal de la API en producción — el
+motor de consultas (`libquery_engine-....so.node`) es un addon nativo
+que se carga adentro del mismo proceso Node (sin spawn), así que
+`prisma generate` y la app corriendo funcionan bien por SSH. Es
+específicamente `prisma migrate deploy` / `prisma migrate status` /
+`prisma migrate dev` los que spawnean el schema-engine y por lo tanto
+fallan acá.
+
+**Lo que funciona**: igual que con `next build`, correr el comando
+afuera del hosting, apuntando directo a la base de producción (la base
+está en Supabase, no en Hostinger, así que cualquier entorno con
+salida a internet sirve):
+
+1. En una carpeta cualquiera fuera del monorepo (para no arrastrar
+   `pnpm`), `npm install prisma@<misma versión que el proyecto>
+   @prisma/client@<misma versión>` — instala rápido, no hace falta el
+   resto de las dependencias.
+2. Copiar ahí `prisma/schema.prisma` y toda la carpeta
+   `prisma/migrations/` del proyecto (tal cual, con el historial
+   completo).
+3. Correr `DATABASE_URL='<la de hbuilds/config/.env o current/.env>'
+   npx prisma migrate deploy` desde esa carpeta — aplica solo las
+   migraciones pendientes, exactamente igual que si corriera en el
+   servidor.
+4. Volver al servidor por SSH solo para `npx prisma generate` (esto sí
+   funciona ahí) y recompilar/reiniciar la API como siempre.
+
+**Para la próxima migración de schema**: no perder tiempo reintentando
+`migrate deploy` por SSH — repetir directamente el paso de arriba.
+Sigue valiendo generar el SQL de la migración con `prisma migrate diff`
+contra una sombra local antes de tocar producción (como se hizo acá),
+pero la APLICACIÓN a producción en sí nunca va a poder correr en este
+hosting mientras tenga este límite de LVE.
