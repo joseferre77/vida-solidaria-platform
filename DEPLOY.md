@@ -402,3 +402,91 @@ apagar **"Implementación automática"** en el panel de las dos Node.js Apps
 dispara nada solo, y el deploy vuelve a depender de apretar "Redeploy" a
 mano (momento en el que Claude ya sabe aplicar el fix de SSH en el mismo
 turno). Cualquiera de las dos opciones alcanza; no hace falta hacer ambas.
+
+## Incidente (20 sep 2026): `next build` no corre en el servidor — LVE bloquea CUALQUIER proceso nuevo durante el build
+
+**Síntoma**: al desplegar la Fase H (Usuarios) y la Fase I (Equipos y
+Secciones), el auto-deploy de Hostinger no se disparó solo después de un
+push (esperado ~12-15 minutos, sin actividad — puede seguir así, no se
+confirmó si quedó deshabilitado o solo es lento; ver la sección de arriba
+sobre el cron/auto-deploy). Al intentar el fix manual de siempre (`npm
+install` + build) directamente por SSH en `hbuilds/last-source`, el
+`npm run build:hostinger` moría siempre en el mismo punto:
+
+```
+Collecting page data ...
+Generating static pages (0/N) ...
+uncaughtException [Error: spawn /opt/alt/alt-nodejs20/root/usr/bin/node EAGAIN]
+```
+
+(a veces acompañado de `node[PID]: pthread_create: Resource temporarily
+unavailable`).
+
+**Diagnóstico**: Next.js arma un worker aparte (un proceso `node` nuevo,
+vía `child_process.spawn`) para la fase de "Generating static pages",
+incluso con una sola página. El plan de hosting tiene un límite LVE de
+procesos/hilos tan ajustado que ese ÚNICO spawn adicional falla siempre,
+sin importar cuánto se le baje el paralelismo al build. Se probó, en
+orden, y ninguno alcanzó por sí solo:
+- `experimental.cpus: 1` en `next.config.mjs` (sigue intentando spawnear
+  igual, aunque sea "1 worker")
+- `experimental.workerThreads: true` (cambia el spawn de proceso por un
+  `pthread_create` — mismo límite, error distinto, y encima rompe el
+  build con `DataCloneError` porque el paso de análisis estático incluye
+  una función que no se puede clonar por `postMessage`)
+- `RAYON_NUM_THREADS=1` / `UV_THREADPOOL_SIZE=1` / `NODE_OPTIONS=--v8-pool-size=1`
+- Frenar el proceso Node de la web en vivo antes de buildear (por si el
+  límite era de la cuenta en conjunto, no del build en sí) — mismo error
+
+**Lo que sí funciona — dos partes, las dos necesarias**:
+
+1. **`export const dynamic = "force-dynamic"`** en `apps/web/app/layout.tsx`.
+   Todas las pantallas de esta app son `"use client"` y traen sus datos
+   por `fetch` en el navegador — no hay ninguna ganancia real en
+   pre-renderizar HTML estático en build time. Esto reduce lo que Next
+   tiene que exportar estáticamente al mínimo indispensable (las páginas
+   internas de error de Next, que no heredan el `dynamic` de las rutas de
+   la app), pero **no alcanza solo** — Next igual intenta spawnear un
+   worker para esas 1-2 páginas restantes y sigue fallando en este hosting.
+
+2. **Buildear en otro lado y transferir el resultado ya armado.** La
+   causa real es el límite de procesos del hosting, no algo del código —
+   así que la solución que terminó funcionando es no correr `next build`
+   ahí en absoluto:
+   - Copiar `apps/web/` a una carpeta plana SIN el monorepo arriba (sin
+     `pnpm-lock.yaml` de la raíz visible), para que Next no la trate como
+     parte de un workspace y el `output: "standalone"` quede con
+     `server.js` en la raíz (si se buildea adentro del monorepo, Next
+     detecta el workspace y anida todo bajo `.next/standalone/apps/web/`,
+     que no es la estructura que espera Hostinger).
+   - `npm install` + `npm run build:hostinger` en esa copia, en un
+     entorno sin el límite de procesos (funcionó perfecto en el sandbox
+     de Claude).
+   - Empaquetar `.next/standalone/` (que ya incluye `public/` y
+     `.next/static/` copiados por el propio script `build:hostinger`) en
+     un `.tar.gz`.
+   - Subirlo al servidor (por `scp`), extraerlo en una carpeta nueva bajo
+     `hbuilds/versions/<algo-unico>/nodejs/`, copiarle el `.env` real
+     desde la versión actual, crear `tmp/restart.txt`, y recién ahí
+     cambiar el symlink `hbuilds/current` para que apunte a esa carpeta
+     nueva (así el sitio no queda nunca a medio armar mientras se arma la
+     versión nueva al lado).
+   - `touch hbuilds/current/nodejs/tmp/restart.txt` para reiniciar.
+
+**Para la próxima vez que haya que tocar el frontend** (hasta que se
+resuelva el límite de procesos del hosting, o se decida migrar de plan):
+NO intentar `npm run build:hostinger` directo por SSH — va a fallar
+siempre en el mismo punto. Repetir el procedimiento de "buildear afuera y
+transferir" de arriba. La API sí se puede seguir arreglando con el
+`npm install` + `npx tsc` de siempre por SSH sin problema (no vimos este
+error ahí — el build de TypeScript no arma workers como `next build`).
+
+**Esto también es relevante para el watchdog** (`watchdog-deploy.sh`) y
+para el auto-deploy de Hostinger si algún día vuelve a andar solo: si el
+pipeline propio de Hostinger corre `next build` con el mismo límite de
+cuenta, va a fallar de la misma manera — el `force-dynamic` del paso 1
+puede ser suficiente para que a ELLOS les funcione (tienen más margen de
+recursos en su propio pipeline de build, probablemente corre en otra
+máquina), pero si el auto-deploy vuelve a fallar específicamente en el
+build (no en el `npm install`/`.env` de siempre), este es el motivo y el
+watchdog actual no lo cubre — quedaría pendiente adaptarlo.
