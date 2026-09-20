@@ -367,3 +367,38 @@ antes (`export $(grep DATABASE_URL hbuilds/config/.env)` o cargarlo con
 `require('dotenv').config()` en el script) y correrlo con `timeout <segundos>
 node script.js` para que nunca quede colgado indefinidamente si algo de red
 falla.
+
+## Incidente (19-20 sep 2026): el sitio quedó caído toda la noche — watchdog por cron
+
+"Implementación automática" volvió a estar activa en algún momento (no se
+sabe cuándo se reactivó) y confirmó, otra vez, que dispara con CUALQUIER
+push a `main` — incluso uno que solo toca `CLAUDE.md`. Cada redeploy nuevo
+pisa el arreglo manual de `node_modules`/`.env` de la sección de arriba, y
+si nadie entra por SSH a repararlo a mano, la web queda con `503`/`Cannot
+find module 'next'` indefinidamente. Así quedó desde ~16:19 UTC del 19/9
+hasta que Josecito mandó una captura de pantalla del error al otro día.
+
+**Arreglo aplicado**: se armó un script watchdog en
+`/home/u859384027/scripts/watchdog-deploy.sh` que revisa `vida-solidaria-web`
+y `vida-solidaria-api` y, si detecta `node_modules`/`.env`/`dist/server.js`
+faltante (la firma exacta de este bug), reaplica el fix completo de SSH
+solo (incluye `prisma migrate deploy` para la API, que es idempotente).
+Tiene lock con `flock` para no pisarse si el cron dispara mientras una
+corrida anterior sigue instalando.
+
+**Falta un paso manual, que solo se puede hacer desde hPanel**: no hay
+`crontab` disponible por SSH en este plan de hosting (CageFS lo bloquea) —
+el cron hay que darlo de alta desde hPanel → **Avanzado → Cron Jobs**,
+apuntando a:
+
+```
+/home/u859384027/scripts/watchdog-deploy.sh
+```
+
+con una frecuencia de cada 5 minutos (`*/5 * * * *`). Alternativa más
+simple si Josecito prefiere no tener el watchdog corriendo todo el tiempo:
+apagar **"Implementación automática"** en el panel de las dos Node.js Apps
+(fila de indicadores arriba del todo) — con eso, un push a GitHub no
+dispara nada solo, y el deploy vuelve a depender de apretar "Redeploy" a
+mano (momento en el que Claude ya sabe aplicar el fix de SSH en el mismo
+turno). Cualquiera de las dos opciones alcanza; no hace falta hacer ambas.
