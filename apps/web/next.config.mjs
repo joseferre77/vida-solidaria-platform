@@ -11,6 +11,15 @@ const nextConfig = {
   // propio proceso de arranque a partir de la carpeta de build en vez de
   // correr "next start" directo.
   output: "standalone",
+  // Este hosting compartido tiene un límite bajo de procesos simultáneos
+  // (LVE) — el pool de workers que Next.js arma por defecto para el build
+  // (según CPUs detectadas) puede superarlo y el build muere con
+  // "spawn ... EAGAIN". Con cpus:1 y workerThreads:false el build corre en
+  // un solo proceso, más lento pero estable en este entorno.
+  experimental: {
+    cpus: 1,
+    workerThreads: false,
+  },
 }
 
 export default nextConfig
