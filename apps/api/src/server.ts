@@ -11,6 +11,8 @@ import { authRoutes } from "./modules/auth/auth.routes"
 import { projectsRoutes } from "./modules/projects/projects.routes"
 import { usersRoutes } from "./modules/users/users.routes"
 import { uploadsRoutes } from "./modules/uploads/uploads.routes"
+import { fieldOpsRoutes } from "./modules/field-ops/field-ops.routes"
+import { logisticsRoutes } from "./modules/logistics/logistics.routes"
 
 async function main() {
   const app = Fastify({
@@ -46,9 +48,11 @@ async function main() {
   await app.register(usersRoutes, { prefix: "/api" })
   await app.register(projectsRoutes, { prefix: "/api" })
   await app.register(uploadsRoutes, { prefix: "/api" })
+  await app.register(fieldOpsRoutes, { prefix: "/api" })
+  await app.register(logisticsRoutes, { prefix: "/api" })
 
-  // TODO (Módulo 3+): registrar acá cases.routes, logistics.routes,
-  // field-ops.routes (con Socket.IO), finance.routes.
+  // TODO (Módulo 3+): registrar acá cases.routes, finance.routes.
+  // logistics/field-ops todavía sin Socket.IO (ver notas en esos módulos).
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {

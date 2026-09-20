@@ -161,6 +161,9 @@ export default function DashboardPage() {
         <RoleGate user={user ?? null} permission="analytics.read">
           <NavCard label="Analítica" disabled />
         </RoleGate>
+        {(hasPermission(user ?? null, "field_ops.read") || hasPermission(user ?? null, "logistics.read")) && (
+          <NavCard label="Equipos y Secciones" href="/equipos" />
+        )}
         {(hasPermission(user ?? null, "projects.admin") ||
           hasPermission(user ?? null, "surveys.manage") ||
           hasPermission(user ?? null, "users.manage")) && (
