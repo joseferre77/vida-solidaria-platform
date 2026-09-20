@@ -542,3 +542,42 @@ Sigue valiendo generar el SQL de la migración con `prisma migrate diff`
 contra una sombra local antes de tocar producción (como se hizo acá),
 pero la APLICACIÓN a producción en sí nunca va a poder correr en este
 hosting mientras tenga este límite de LVE.
+
+
+## Incidente (20 sep 2026): tras el primer deploy de Casos, el login rompió con "Failed to fetch" — faltaba el `.env` al buildear afuera
+
+**Síntoma**: después de desplegar la Fase J (Casos) con el procedimiento
+de "buildear afuera y transferir" de más arriba, el login dejó de
+funcionar en el sitio en vivo con `Failed to fetch` en el navegador.
+
+**Causa**: las variables `NEXT_PUBLIC_*` (acá `NEXT_PUBLIC_API_URL` y
+`NEXT_PUBLIC_SOCKET_URL`) se inyectan en el HTML/JS **en el momento del
+build**, no en el momento en que corre el servidor — quedan
+"horneadas" adentro de los chunks estáticos. La primera vez que se
+armó la copia plana para buildear afuera (fuera del servidor) no se
+copió ningún `.env`, así que Next usó el default hardcodeado en el
+código (`http://localhost:4000`) — el build terminó bien, sin ningún
+error, y recién se notó en producción porque el navegador intentaba
+pegarle a `localhost:4000` en vez de a `https://api.vidasolidariamdp.com`.
+
+**Fix**: antes de correr `npm run build:hostinger` en la copia plana,
+crear ahí un `.env.production.local` con los mismos valores que ya
+están en `hbuilds/config/.env` / `hbuilds/current/nodejs/.env` del
+servidor:
+
+```
+NEXT_PUBLIC_API_URL='https://api.vidasolidariamdp.com'
+NEXT_PUBLIC_SOCKET_URL='https://api.vidasolidariamdp.com'
+```
+
+**Chequeo antes de dar por bueno cualquier build hecho afuera**: correr
+
+```
+grep -ro "api\.vidasolidariamdp\.com\|localhost:4000" .next/standalone/.next/static/chunks/*.js | sort | uniq -c
+```
+
+y confirmar que aparece SOLO el dominio real, nunca `localhost:4000`,
+antes de empaquetar y subir el `.tar.gz`. Este chequeo hay que
+repetirlo en cada deploy de la web hecho con este procedimiento — no
+es algo que se configure una sola vez, porque cada build es una copia
+nueva y descartable.
