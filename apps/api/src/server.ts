@@ -1,6 +1,7 @@
 import path from "node:path"
 import fs from "node:fs"
 import Fastify, { type FastifyError } from "fastify"
+import { ZodError } from "zod"
 import cors from "@fastify/cors"
 import cookie from "@fastify/cookie"
 import multipart from "@fastify/multipart"
@@ -57,6 +58,20 @@ async function main() {
   // logistics/field-ops/cases todavía sin Socket.IO (ver notas en esos módulos).
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
+    // Bug arrastrado desde el Módulo 1: TODAS las rutas validan el body con
+    // `xxxSchema.parse(request.body)` (Zod), no con el validador de schema
+    // nativo de Fastify — así que un dato inválido (ej. email mal formado o
+    // contraseña corta al hacer login) tira un ZodError, que `error.validation`
+    // (que es la propiedad de Fastify, no de Zod) nunca detecta. Sin este
+    // chequeo, cualquier dato inválido en cualquier endpoint caía derecho al
+    // 500 de abajo — un error de VALIDACIÓN (culpa de quien carga el dato)
+    // devuelto como si fuera una falla interna del servidor.
+    if (error instanceof ZodError) {
+      return reply.code(400).send({
+        error: error.issues[0]?.message ?? "Datos inválidos",
+        details: error.issues,
+      })
+    }
     if (error.validation) {
       return reply.code(400).send({ error: "Datos inválidos", details: error.validation })
     }

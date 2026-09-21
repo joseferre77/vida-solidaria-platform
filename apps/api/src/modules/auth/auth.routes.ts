@@ -14,8 +14,8 @@ import {
 import { requireAuth } from "../../middleware/auth.middleware"
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
+  email: z.string().email("Ingresá un email válido"),
+  password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
 })
 
 const COOKIE_OPTS = {
