@@ -1,10 +1,10 @@
 # PLAN — Fase K: Voluntariado, Presentismo, Cocina, Casos, Stock y Analítica
 
-> Estado: **planificado, sin iniciar**. Este documento traduce el pedido de
-> Josecito (21/09/2026) a diseño técnico concreto, contrastado contra el
-> schema y las rutas YA existentes (no se repite trabajo hecho). Se arranca a
-> construir recién cuando se confirme el orden de milestones al final de este
-> archivo. Actualizar el estado de cada bloque a medida que se entrega.
+> Estado: **F + C entregados y en producción (21/09/2026)**. Este documento
+> traduce el pedido de Josecito (21/09/2026) a diseño técnico concreto,
+> contrastado contra el schema y las rutas YA existentes (no se repite
+> trabajo hecho). Sigue en **A) Alta pública de voluntarios**. Actualizar el
+> estado de cada bloque a medida que se entrega.
 
 ## Método
 
@@ -79,25 +79,18 @@ alimentan el ranking de participación (bloque G).
 
 ---
 
-## C) Cocina — estados y producción (EXTIENDE Fase I)
+## C) Cocina — estados y producción (EXTIENDE Fase I) ✅ ENTREGADO (junto con F)
 
-**Ya existe**: `KitchenBatch` con estados `preparacion → coccion →
-listo_transporte → entregado`, ingredientes (`KitchenBatchIngredient` →
-`StockItem`), asignados (`KitchenBatchAssignee`), historial de cambios de
-estado. Rutas completas en `logistics.routes.ts`. UI en
-`/equipos → Cocina`.
+Enum ampliado a los 6 estados pedidos y `responsibleUserId` agregado — ver
+detalle en el bloque F de arriba (se construyeron y deployaron juntos porque
+la interjección de Josecito sobre el responsable de cocina llegó a mitad de
+la implementación de F).
 
-**Cambios**: ampliar el enum a los 5 estados que pediste —
-`preparacion → coccion → cocina_terminada → cargando_conservadoras →
-camino_punto_encuentro → entregado` (6 en total contando el cierre) — switch
-simple en la UI, ya como está, solo se agregan pasos.
-
-**Producción / litros de té-café-mate cocido**: se resuelve con
-`FieldDelivery` (ya existe, ligado a `Checkin` tipo `entregando_viandas`) —
-solo hace falta que al cargar la entrega se anoten también los líquidos como
-ítems (`itemLabel: "Té", quantity: 40, unit: litros`), no hace falta
-modelo nuevo. El indicador semanal sale de sumar `FieldDelivery` por
-domingo (bloque G).
+**Pendiente, sin tocar todavía**: producción / litros de té-café-mate cocido
+por domingo. Se resuelve con `FieldDelivery` (ya existe, ligado a `Checkin`
+tipo `entregando_viandas`) anotando los líquidos como ítems (`itemLabel:
+"Té", quantity: 40, unit: litros`) — no hace falta modelo nuevo. El
+indicador semanal sale de sumar `FieldDelivery` por domingo (bloque G).
 
 ---
 
@@ -140,23 +133,55 @@ tener varios usuarios con distintos roles a la vez.
 
 ---
 
-## F) Stock e inventario — materia prima + custodia de equipamiento
+## F) Stock e inventario — materia prima + custodia de equipamiento ✅ ENTREGADO
 
-**Ya existe (schema + rutas mínimas)**: `StockItem` (nombre/unidad/categoría/
-alerta mínima) y `StockMovement` (ledger ingreso/egreso, nunca un campo de
-"cantidad actual" mutable — ya sigue la convención del repo). Sirve tal cual
-para materia prima (kg de pollo/papa/zanahoria/condimentos) y descartables
-(bandejas, guantes, cofias, cajas de té/café/mate cocido) — falta cargar el
-catálogo real y construir la UI de movimientos (no existe todavía, solo el
-catálogo de ítems se usa hoy para armar lotes de cocina).
+**Construido (21/09/2026)** — terminó más completo que el diseño original de
+más arriba porque Josecito pidió, a mitad de la implementación, un form tipo
+TPV/red vivo:
 
-**Falta (nuevo) — custodia de lo permanente**: conservadoras, termos, ollas,
-cucharones no se "consumen", se **prestan** y tienen que volver a lo de
-Lourdes cada semana. Se agrega `StockItem.isReusable: Boolean` y un modelo
-`StockCustody` (stockItemId, holderUserId, checkedOutAt, returnedAt) — al
-asignar el equipo de cocina de la semana, se generan los préstamos; queda
-registrado quién tiene cada cosa y desde cuándo, y "devuelto a Lourdes" cierra
-el préstamo.
+- `StockItem` con **código automático** (`ART-0001`, contador tipo
+  `Case.caseNumber`), `unit` como **enum tipado** (`kg | litros | unidades |
+  paquetes | cajas`, ya no texto libre), `category`, `isReusable`,
+  `unitCost`, `reorderPoint` (punto de pedido), `restockTarget` (punto de
+  reposición). La cantidad **sigue sin guardarse** como campo mutable: se
+  calcula siempre sumando `StockMovement` (ingreso − egreso), igual que
+  antes — la convención del repo no se tocó.
+- `GET/POST /api/stock-items/:id/movements` — ledger de movimientos con
+  motivo y quién lo cargó. `GET /api/stock-summary` — KPIs para el dashboard
+  (total de ítems, valuación total, cantidad bajo punto de pedido, cantidad
+  de reusables prestados).
+- **Alerta de stock bajo**: se dispara (notificación in-app + email) solo al
+  *cruzar* el punto de pedido hacia abajo, no en cada movimiento — evita
+  spam cuando un ítem ya está bajo y se sigue usando.
+- **Descuento automático al cocinar**: asignar/editar un ingrediente de un
+  lote de cocina genera el `StockMovement` de egreso correspondiente (por la
+  diferencia, nunca duplica); quitar un ingrediente genera el movimiento de
+  reversión (ingreso) — nunca se borra ni se edita un movimiento ya
+  registrado, se lo compensa (ledger append-only).
+- **Custodia de lo permanente** (conservadoras, termos, ollas, cucharones):
+  `StockCustody` (quién lo tiene, quién lo entregó, cuándo, notas de
+  devolución) con check-out/return desde la UI.
+- **Responsable de cocina**: `KitchenBatch.responsibleUserId` — se asigna al
+  crear el lote o después, desde el detalle.
+- Estados de cocina ampliados a los 6 pedidos: `preparacion → coccion →
+  cocina_terminada → listo_transporte ("Cargando conservadoras") →
+  camino_punto_encuentro → entregado`.
+- **UI**: `apps/web/app/equipos/tabs/Stock.tsx` reescrita como TPV — 4
+  tarjetas de KPI, catálogo agrupado por categoría, alta/edición de insumos,
+  registro de movimientos con historial expandible, custodia de reusables.
+- **Notificaciones (nuevo módulo, reutilizable para D)**: `Notification`
+  (in-app) + `apps/api/src/lib/email.ts` (Resend, no-op sin
+  `RESEND_API_KEY` — nada se rompe hasta que exista la cuenta) +
+  `apps/api/src/lib/notify.ts` (helpers `usersWithPermission` / `notify`).
+  `GET /api/notifications`, `PATCH /api/notifications/:id/read`,
+  `PATCH /api/notifications/read-all` — **falta la campanita en el navbar
+  del frontend** (`lib/notifications.ts` ya existe, sin consumidores todavía).
+
+**Verificado end-to-end en producción**: migración aplicada, código
+`ART-0001` generado, ledger ingreso/egreso calculado correctamente (30 − 5 =
+25), limpieza de datos de prueba sin dejar rastro. Deploy de API y frontend
+(`gestion.vidasolidariamdp.com`) confirmados arriba con `/health` en 200 y
+las rutas nuevas devolviendo 401 (auth) en vez de 404.
 
 ---
 
@@ -189,22 +214,26 @@ sola ruta construida. Se arma `GET /api/analytics/*` (permiso ya existe:
 - Punto de encuentro: **Bv. Marítimo (Av. P. Peralta Ramos) 2502**.
 - "Con/sin móvil": solo **con/sin teléfono celular cargado** (no
   movilidad física) — no requiere campo nuevo.
+- `FieldTeamMember` pasa a ser **semanal** (equipos siempre reconfigurables
+  por alta rotación de voluntarios/coordinadores — se arman de nuevo cada
+  domingo según convocatoria confirmada, no equipos fijos).
 
-## Preguntas abiertas (antes de tocar código de B)
+## Preguntas abiertas (antes de tocar código de D)
 
-1. ¿`FieldTeamMember` pasa a ser semanal (ver bloque B) o se mantienen
-   equipos fijos?
-2. ¿Qué cuenta como "caso cerrado" a efectos del email de cierre — un campo
+1. ¿Qué cuenta como "caso cerrado" a efectos del email de cierre — un campo
    de estado específico, o alcanza con `feasibility = no_factible`?
 
-## Orden de construcción propuesto
+## Orden de construcción
 
-1. **F (catálogo de stock real) + C (ampliar estados de cocina)** — son los
-   cambios más chicos y no dependen de nada nuevo.
-2. **A (alta pública + aprobación + Resend)** — desbloquea tener email
-   andando, que después reutilizan D.
-3. **B (presentismo + equipos semanales)** — el más grande de este lote,
-   depende de la respuesta a la pregunta 1.
+1. ~~**F (catálogo de stock real) + C (ampliar estados de cocina)**~~ —
+   **entregado y en producción el 21/09/2026.**
+2. **A (alta pública + aprobación + Resend)** — siguiente. Desbloquea tener
+   email andando, que después reutiliza D. Necesita que Josecito cree la
+   cuenta de Resend y pase la `RESEND_API_KEY` en algún momento de este
+   bloque (no bloquea empezar: el sistema funciona sin ella, solo no manda
+   los mails hasta que se cargue).
+3. **B (presentismo + equipos semanales)** — el más grande de este lote, ya
+   con la pregunta 1 original resuelta (equipos semanales confirmado).
 4. **D (asignación de casos con roles + notificaciones)** y **E (KPI de
    relevamiento + buscador)** — en paralelo, son independientes entre sí.
 5. **G (analítica)** — al final, porque consume datos de todos los
