@@ -13,6 +13,7 @@ import {
   STAY_TYPES,
   uploadCaseFile,
   type CaseType,
+  type CreateCaseMemberInput,
   type NeedCategory,
   type NeedUrgency,
   type StayType,
@@ -23,12 +24,42 @@ import {
  * para completarse en el momento, parado en la calle, con el celular.
  * Wizard de pasos grandes (un tema por pantalla) en vez de un formulario
  * largo — más fácil de completar con una mano y sin perder el lugar.
+ *
+ * Fase J.1: cuando el tipo de caso es "pareja" o "grupo_familiar" se suma
+ * un paso de "Integrantes" — el paso 1 sigue siendo el referente del
+ * grupo, y acá se agrega el resto de las personas, cada una con sus
+ * propios datos y diagnóstico (antes esto no se podía cargar).
  */
-
-const TOTAL_STEPS = 6
 
 type NeedDraft = { category: NeedCategory; urgency: NeedUrgency; notes: string }
 type SkillDraft = { skillLabel: string; level: string }
+type MemberDraft = {
+  fullName: string
+  alias: string
+  approxAge: string
+  dni: string
+  sex: string
+  healthStatus: string
+  wantsToWork: boolean | null
+  workAptitude: string
+  legalSituation: string
+  substanceUse: string
+}
+
+const EMPTY_MEMBER: MemberDraft = {
+  fullName: "",
+  alias: "",
+  approxAge: "",
+  dni: "",
+  sex: "",
+  healthStatus: "",
+  wantsToWork: null,
+  workAptitude: "",
+  legalSituation: "",
+  substanceUse: "",
+}
+
+type StepKey = "basicos" | "integrantes" | "ubicacion" | "diagnostico" | "necesidades" | "fotos" | "revisar"
 
 const bigButton =
   "w-full rounded-2xl border-2 px-5 py-4 text-left text-base font-medium transition active:scale-[0.98]"
@@ -41,9 +72,9 @@ const navBtnSecondary =
   "flex-1 rounded-2xl border border-white/20 px-5 py-4 text-center text-base text-cream hover:bg-white/5"
 
 export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => void }) {
-  const [step, setStep] = useState(1)
+  const [stepIndex, setStepIndex] = useState(0)
 
-  // Paso 1
+  // Paso "basicos" (referente del grupo si es pareja/grupo familiar)
   const [caseType, setCaseType] = useState<CaseType>("individual")
   const [fullName, setFullName] = useState("")
   const [alias, setAlias] = useState("")
@@ -52,7 +83,10 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
   const [sex, setSex] = useState("")
   const [phone, setPhone] = useState("")
 
-  // Paso 2
+  // Paso "integrantes" (solo pareja / grupo_familiar)
+  const [members, setMembers] = useState<MemberDraft[]>([])
+
+  // Paso "ubicacion"
   const [lat, setLat] = useState("")
   const [lng, setLng] = useState("")
   const [locating, setLocating] = useState(false)
@@ -60,24 +94,36 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
   const [stayType, setStayType] = useState<StayType | "">("")
   const [currentSleepSpot, setCurrentSleepSpot] = useState("")
 
-  // Paso 3
+  // Paso "diagnostico" (del referente)
   const [healthStatus, setHealthStatus] = useState("")
   const [wantsToWork, setWantsToWork] = useState<boolean | null>(null)
   const [workAptitude, setWorkAptitude] = useState("")
   const [legalSituation, setLegalSituation] = useState("")
   const [substanceUse, setSubstanceUse] = useState("")
 
-  // Paso 4
+  // Paso "necesidades" (del grupo / referente)
   const [needs, setNeeds] = useState<NeedDraft[]>([])
   const [skills, setSkills] = useState<SkillDraft[]>([])
 
-  // Paso 5
+  // Paso "fotos"
   const [photoUrls, setPhotoUrls] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+
+  const isGroup = caseType !== "individual"
+  const steps: StepKey[] = [
+    "basicos",
+    ...(isGroup ? (["integrantes"] as const) : []),
+    "ubicacion",
+    "diagnostico",
+    "necesidades",
+    "fotos",
+    "revisar",
+  ]
+  const currentStep = steps[stepIndex] ?? steps[0]
 
   function useMyLocation() {
     if (!navigator.geolocation) {
@@ -119,15 +165,36 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
   }
 
   function canAdvance() {
-    if (step === 1) return fullName.trim().length >= 2
-    if (step === 2) return Boolean(lat && lng)
+    if (currentStep === "basicos") return fullName.trim().length >= 2
+    if (currentStep === "ubicacion") return Boolean(lat && lng)
     return true
+  }
+
+  function updateMember(i: number, patch: Partial<MemberDraft>) {
+    const next = [...members]
+    next[i] = { ...next[i], ...patch }
+    setMembers(next)
   }
 
   async function handleSubmit() {
     setSaving(true)
     setError(null)
     try {
+      const memberInputs: CreateCaseMemberInput[] = members
+        .filter((m) => m.fullName.trim().length >= 2)
+        .map((m) => ({
+          fullName: m.fullName.trim(),
+          alias: m.alias.trim() || undefined,
+          approxAge: m.approxAge ? Number(m.approxAge) : undefined,
+          dni: m.dni.trim() || undefined,
+          sex: m.sex.trim() || undefined,
+          healthStatus: m.healthStatus.trim() || undefined,
+          wantsToWork: m.wantsToWork ?? undefined,
+          workAptitude: m.workAptitude.trim() || undefined,
+          legalSituation: m.legalSituation.trim() || undefined,
+          substanceUse: m.substanceUse.trim() || undefined,
+        }))
+
       const result = await createCase({
         fullName: fullName.trim(),
         alias: alias.trim() || undefined,
@@ -151,6 +218,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
           .map((n) => ({ category: n.category, urgency: n.urgency, notes: n.notes.trim() || undefined })),
         skills: skills.filter((s) => s.skillLabel.trim()).map((s) => ({ skillLabel: s.skillLabel.trim(), level: s.level.trim() || undefined })),
         photoUrls: photoUrls.length ? photoUrls : undefined,
+        members: memberInputs.length ? memberInputs : undefined,
       })
       setDone(result.caseNumber)
     } catch (err: any) {
@@ -161,7 +229,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
   }
 
   function resetAll() {
-    setStep(1)
+    setStepIndex(0)
     setCaseType("individual")
     setFullName("")
     setAlias("")
@@ -169,6 +237,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
     setDni("")
     setSex("")
     setPhone("")
+    setMembers([])
     setLat("")
     setLng("")
     setDayZone("")
@@ -210,27 +279,36 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
     <div className="mx-auto max-w-md">
       <div className="mb-5">
         <div className="mb-1.5 flex justify-between text-xs text-cream/50">
-          <span>Paso {step} de {TOTAL_STEPS}</span>
-          <span>{Math.round((step / TOTAL_STEPS) * 100)}%</span>
+          <span>Paso {stepIndex + 1} de {steps.length}</span>
+          <span>{Math.round(((stepIndex + 1) / steps.length) * 100)}%</span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-white/10">
-          <div className="h-full rounded-full bg-yellow transition-all" style={{ width: `${(step / TOTAL_STEPS) * 100}%` }} />
+          <div
+            className="h-full rounded-full bg-yellow transition-all"
+            style={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
+          />
         </div>
       </div>
 
       {error && <p className="mb-4 rounded-xl bg-orange/10 px-4 py-2 text-sm text-orange">{error}</p>}
 
-      {step === 1 && (
+      {currentStep === "basicos" && (
         <section>
           <h2 className="mb-1 font-display text-lg font-bold text-yellow">¿A quién estás relevando?</h2>
-          <p className="mb-4 text-sm text-cream/60">Datos básicos. Solo el nombre es obligatorio.</p>
+          <p className="mb-4 text-sm text-cream/60">
+            Datos básicos. Solo el nombre es obligatorio. Si es pareja o grupo, cargá acá al referente — al resto se
+            lo agrega en el próximo paso.
+          </p>
 
           <div className="mb-4 grid grid-cols-1 gap-2">
             {CASE_TYPES.map((t) => (
               <button
                 key={t}
                 type="button"
-                onClick={() => setCaseType(t)}
+                onClick={() => {
+                  setCaseType(t)
+                  if (t === "individual") setMembers([])
+                }}
                 className={`${bigButton} ${caseType === t ? "border-yellow bg-yellow/10 text-yellow" : "border-white/15 bg-white/5 text-cream"}`}
               >
                 {CASE_TYPE_LABEL[t]}
@@ -272,7 +350,129 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
         </section>
       )}
 
-      {step === 2 && (
+      {currentStep === "integrantes" && (
+        <section>
+          <h2 className="mb-1 font-display text-lg font-bold text-yellow">Resto del grupo</h2>
+          <p className="mb-4 text-sm text-cream/60">
+            Cargá acá a cada integrante además de {fullName.trim() || "el referente"} — cada uno con sus propios
+            datos y diagnóstico. Podés agregar cuantos necesites.
+          </p>
+
+          {members.map((m, i) => (
+            <div key={i} className="mb-3 rounded-2xl border border-white/15 bg-white/5 p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-semibold text-cream">Integrante {i + 2}</span>
+                <button type="button" onClick={() => setMembers(members.filter((_, idx) => idx !== i))} className="text-xs text-orange">
+                  Quitar
+                </button>
+              </div>
+
+              <label className="mb-2 block">
+                <span className={labelCls}>Nombre completo *</span>
+                <input
+                  value={m.fullName}
+                  onChange={(e) => updateMember(i, { fullName: e.target.value })}
+                  className={inputCls}
+                  placeholder="Nombre y apellido"
+                />
+              </label>
+              <div className="mb-2 grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className={labelCls}>Alias</span>
+                  <input value={m.alias} onChange={(e) => updateMember(i, { alias: e.target.value })} className={inputCls} />
+                </label>
+                <label className="block">
+                  <span className={labelCls}>Edad aprox.</span>
+                  <input
+                    inputMode="numeric"
+                    value={m.approxAge}
+                    onChange={(e) => updateMember(i, { approxAge: e.target.value.replace(/\D/g, "") })}
+                    className={inputCls}
+                  />
+                </label>
+              </div>
+              <div className="mb-2 grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className={labelCls}>DNI</span>
+                  <input value={m.dni} onChange={(e) => updateMember(i, { dni: e.target.value })} className={inputCls} inputMode="numeric" />
+                </label>
+                <label className="block">
+                  <span className={labelCls}>Sexo</span>
+                  <input value={m.sex} onChange={(e) => updateMember(i, { sex: e.target.value })} className={inputCls} />
+                </label>
+              </div>
+              <label className="mb-2 block">
+                <span className={labelCls}>Estado de salud observado</span>
+                <textarea
+                  value={m.healthStatus}
+                  onChange={(e) => updateMember(i, { healthStatus: e.target.value })}
+                  className={inputCls}
+                  rows={2}
+                />
+              </label>
+
+              <span className={labelCls}>¿Quiere trabajar?</span>
+              <div className="mb-2 grid grid-cols-3 gap-2">
+                {[
+                  { v: true, l: "Sí" },
+                  { v: false, l: "No" },
+                  { v: null, l: "No sabe" },
+                ].map((opt) => (
+                  <button
+                    key={String(opt.v)}
+                    type="button"
+                    onClick={() => updateMember(i, { wantsToWork: opt.v })}
+                    className={`rounded-xl border-2 px-2 py-2 text-xs font-medium ${
+                      m.wantsToWork === opt.v ? "border-yellow bg-yellow/10 text-yellow" : "border-white/15 bg-white/5 text-cream"
+                    }`}
+                  >
+                    {opt.l}
+                  </button>
+                ))}
+              </div>
+
+              <label className="mb-2 block">
+                <span className={labelCls}>Aptitud / oficio</span>
+                <input value={m.workAptitude} onChange={(e) => updateMember(i, { workAptitude: e.target.value })} className={inputCls} />
+              </label>
+              <label className="mb-2 block">
+                <span className={labelCls}>Situación legal</span>
+                <textarea
+                  value={m.legalSituation}
+                  onChange={(e) => updateMember(i, { legalSituation: e.target.value })}
+                  className={inputCls}
+                  rows={2}
+                />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Consumo problemático (si observás)</span>
+                <textarea
+                  value={m.substanceUse}
+                  onChange={(e) => updateMember(i, { substanceUse: e.target.value })}
+                  className={inputCls}
+                  rows={2}
+                />
+              </label>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => setMembers([...members, { ...EMPTY_MEMBER }])}
+            className={`${navBtnSecondary} mt-1`}
+          >
+            + Agregar integrante
+          </button>
+          {members.length === 0 && (
+            <p className="mt-2 text-xs text-cream/40">
+              Sin integrantes cargados todavía. Las necesidades/habilidades de cada uno se pueden agregar acá o
+              después desde el seguimiento del caso.
+            </p>
+          )}
+        </section>
+      )}
+
+      {currentStep === "ubicacion" && (
         <section>
           <h2 className="mb-1 font-display text-lg font-bold text-yellow">¿Dónde está ahora?</h2>
           <p className="mb-4 text-sm text-cream/60">La ubicación es obligatoria — apretá el botón parado en el lugar.</p>
@@ -308,9 +508,11 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
         </section>
       )}
 
-      {step === 3 && (
+      {currentStep === "diagnostico" && (
         <section>
-          <h2 className="mb-1 font-display text-lg font-bold text-yellow">Diagnóstico situacional</h2>
+          <h2 className="mb-1 font-display text-lg font-bold text-yellow">
+            Diagnóstico situacional{isGroup ? " (referente)" : ""}
+          </h2>
           <p className="mb-4 text-sm text-cream/60">Todo opcional — completá lo que puedas ahora, el resto se agrega después.</p>
 
           <label className="mb-3 block">
@@ -353,10 +555,14 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
         </section>
       )}
 
-      {step === 4 && (
+      {currentStep === "necesidades" && (
         <section>
           <h2 className="mb-1 font-display text-lg font-bold text-yellow">Necesidades y habilidades</h2>
-          <p className="mb-4 text-sm text-cream/60">Opcional — podés dejarlo para después.</p>
+          <p className="mb-4 text-sm text-cream/60">
+            {isGroup
+              ? "Del grupo en conjunto (compartidas). Las de cada integrante se agregan por separado desde el seguimiento del caso."
+              : "Opcional — podés dejarlo para después."}
+          </p>
 
           <div className="mb-5">
             <div className="mb-2 flex items-center justify-between">
@@ -456,7 +662,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
         </section>
       )}
 
-      {step === 5 && (
+      {currentStep === "fotos" && (
         <section>
           <h2 className="mb-1 font-display text-lg font-bold text-yellow">Fotos</h2>
           <p className="mb-4 text-sm text-cream/60">Opcional. La primera foto queda como foto principal.</p>
@@ -492,36 +698,49 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
         </section>
       )}
 
-      {step === 6 && (
+      {currentStep === "revisar" && (
         <section>
           <h2 className="mb-1 font-display text-lg font-bold text-yellow">Revisar y guardar</h2>
           <p className="mb-4 text-sm text-cream/60">Verificá los datos principales antes de guardar.</p>
 
           <div className="space-y-2 rounded-2xl border border-white/15 bg-white/5 p-4 text-sm">
             <p><span className="text-cream/50">Tipo:</span> {CASE_TYPE_LABEL[caseType]}</p>
-            <p><span className="text-cream/50">Nombre:</span> {fullName || "—"}</p>
+            <p><span className="text-cream/50">Referente:</span> {fullName || "—"}</p>
             {alias && <p><span className="text-cream/50">Alias:</span> {alias}</p>}
+            {isGroup && (
+              <p>
+                <span className="text-cream/50">Integrantes cargados:</span>{" "}
+                {members.filter((m) => m.fullName.trim().length >= 2).length}
+              </p>
+            )}
             <p><span className="text-cream/50">Ubicación:</span> {lat && lng ? `${lat}, ${lng}` : "sin capturar"}</p>
             {dayZone && <p><span className="text-cream/50">Zona:</span> {dayZone}</p>}
             {stayType && <p><span className="text-cream/50">Permanencia:</span> {STAY_TYPE_LABEL[stayType]}</p>}
-            <p><span className="text-cream/50">Necesidades:</span> {needs.length}</p>
+            <p><span className="text-cream/50">Necesidades del grupo:</span> {needs.length}</p>
             <p><span className="text-cream/50">Fotos:</span> {photoUrls.length}</p>
           </div>
+
+          {isGroup && members.some((m) => m.fullName.trim().length < 2) && (
+            <p className="mt-3 text-xs text-orange">
+              Hay {members.filter((m) => m.fullName.trim().length < 2).length} integrante(s) sin nombre — no se van a
+              guardar. Volvé al paso de Integrantes si querés completarlos.
+            </p>
+          )}
         </section>
       )}
 
       <div className="mt-6 flex gap-3">
-        {step > 1 && (
-          <button type="button" onClick={() => setStep(step - 1)} className={navBtnSecondary}>
+        {stepIndex > 0 && (
+          <button type="button" onClick={() => setStepIndex(stepIndex - 1)} className={navBtnSecondary}>
             Atrás
           </button>
         )}
-        {step < TOTAL_STEPS && (
-          <button type="button" onClick={() => setStep(step + 1)} disabled={!canAdvance()} className={navBtnPrimary}>
+        {stepIndex < steps.length - 1 && (
+          <button type="button" onClick={() => setStepIndex(stepIndex + 1)} disabled={!canAdvance()} className={navBtnPrimary}>
             Siguiente
           </button>
         )}
-        {step === TOTAL_STEPS && (
+        {stepIndex === steps.length - 1 && (
           <button type="button" onClick={handleSubmit} disabled={saving} className={navBtnPrimary}>
             {saving ? "Guardando..." : "Guardar caso"}
           </button>

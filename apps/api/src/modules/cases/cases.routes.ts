@@ -13,6 +13,13 @@
  * schema desde Milestone 1, sin usar hasta ahora) con un upsert atómico —
  * no depende de ningún trigger de Postgres.
  *
+ * Integrantes (Fase J.1): cuando `caseType` es "pareja" o "grupo_familiar",
+ * los campos de persona en `Case` (fullName, dni, healthStatus, etc.)
+ * representan al REFERENTE del grupo — el resto de los integrantes vive en
+ * `CaseMember`, cada uno con sus propios datos, diagnóstico y necesidades/
+ * habilidades (que pueden ser del integrante puntual o del grupo en
+ * general — `CaseNeed`/`CaseSkill` tienen `caseMemberId` opcional para eso).
+ *
  * Nota de schema (igual que en field-ops/logistics): `Case.createdBy`/
  * `updatedBy`, `CaseContactHistory.userId`, `CaseLocation.recordedBy`,
  * `CasePhoto.uploadedBy` y `CaseStatusHistory.changedBy` son campos
@@ -43,6 +50,34 @@ const skillInputSchema = z.object({
   level: z.string().trim().optional(),
 })
 
+const memberInputSchema = z.object({
+  fullName: z.string().min(2, "El nombre del integrante es obligatorio"),
+  alias: z.string().trim().optional(),
+  approxAge: z.number().int().positive().optional(),
+  dni: z.string().trim().optional(),
+  sex: z.string().trim().optional(),
+  healthStatus: z.string().trim().optional(),
+  wantsToWork: z.boolean().optional(),
+  workAptitude: z.string().trim().optional(),
+  legalSituation: z.string().trim().optional(),
+  substanceUse: z.string().trim().optional(),
+  needs: z.array(needInputSchema).optional(),
+  skills: z.array(skillInputSchema).optional(),
+})
+
+const updateMemberSchema = z.object({
+  fullName: z.string().min(2).optional(),
+  alias: z.string().trim().nullable().optional(),
+  approxAge: z.number().int().positive().nullable().optional(),
+  dni: z.string().trim().nullable().optional(),
+  sex: z.string().trim().nullable().optional(),
+  healthStatus: z.string().trim().nullable().optional(),
+  wantsToWork: z.boolean().nullable().optional(),
+  workAptitude: z.string().trim().nullable().optional(),
+  legalSituation: z.string().trim().nullable().optional(),
+  substanceUse: z.string().trim().nullable().optional(),
+})
+
 const createCaseSchema = z.object({
   fullName: z.string().min(2, "El nombre es obligatorio"),
   alias: z.string().trim().optional(),
@@ -65,6 +100,9 @@ const createCaseSchema = z.object({
   needs: z.array(needInputSchema).optional(),
   skills: z.array(skillInputSchema).optional(),
   photoUrls: z.array(z.string().url()).optional(),
+  // Solo tiene sentido con caseType "pareja" / "grupo_familiar" — el resto
+  // del grupo aparte del referente cargado arriba.
+  members: z.array(memberInputSchema).optional(),
 })
 
 const updateCaseSchema = z.object({
@@ -127,6 +165,28 @@ const CASE_DETAIL_INCLUDE = {
   skills: true,
   needs: { orderBy: { createdAt: "desc" as const } },
   statusHistory: { orderBy: { changedAt: "desc" as const } },
+  members: {
+    orderBy: { createdAt: "asc" as const },
+    include: {
+      needs: { orderBy: { createdAt: "desc" as const } },
+      skills: true,
+    },
+  },
+}
+
+function serializeNeed(x: any) {
+  return {
+    id: x.id,
+    category: x.category,
+    urgency: x.urgency,
+    notes: x.notes,
+    resolvedAt: x.resolvedAt,
+    createdAt: x.createdAt,
+  }
+}
+
+function serializeSkill(x: any) {
+  return { id: x.id, skillLabel: x.skillLabel, level: x.level }
 }
 
 async function serializeCaseDetail(c: any) {
@@ -184,20 +244,29 @@ async function serializeCaseDetail(c: any) {
       takenAt: x.takenAt,
       uploadedBy: users.get(x.uploadedBy) ?? null,
     })),
-    skills: c.skills.map((x: any) => ({ id: x.id, skillLabel: x.skillLabel, level: x.level })),
-    needs: c.needs.map((x: any) => ({
-      id: x.id,
-      category: x.category,
-      urgency: x.urgency,
-      notes: x.notes,
-      resolvedAt: x.resolvedAt,
-      createdAt: x.createdAt,
-    })),
+    skills: c.skills.map(serializeSkill),
+    needs: c.needs.map(serializeNeed),
     statusHistory: c.statusHistory.map((x: any) => ({
       toStatus: x.toStatus,
       fromStatus: x.fromStatus,
       changedAt: x.changedAt,
       changedBy: users.get(x.changedBy) ?? null,
+    })),
+    members: c.members.map((m: any) => ({
+      id: m.id,
+      fullName: m.fullName,
+      alias: m.alias,
+      approxAge: m.approxAge,
+      dni: m.dni,
+      sex: m.sex,
+      healthStatus: m.healthStatus,
+      wantsToWork: m.wantsToWork,
+      workAptitude: m.workAptitude,
+      legalSituation: m.legalSituation,
+      substanceUse: m.substanceUse,
+      createdAt: m.createdAt,
+      needs: m.needs.map(serializeNeed),
+      skills: m.skills.map(serializeSkill),
     })),
   }
 }
@@ -207,7 +276,7 @@ export async function casesRoutes(app: FastifyInstance) {
     const { status } = request.query as { status?: string }
     const cases = await prisma.case.findMany({
       where: { status: (status as (typeof CASE_STATUSES)[number]) || undefined },
-      include: { needs: true },
+      include: { needs: true, members: { select: { id: true } } },
       orderBy: { createdAt: "desc" },
       take: 200,
     })
@@ -224,6 +293,7 @@ export async function casesRoutes(app: FastifyInstance) {
       feasibility: c.feasibility,
       createdAt: c.createdAt,
       openNeedsCount: c.needs.filter((n) => !n.resolvedAt).length,
+      memberCount: c.members.length,
     }))
   })
 
@@ -238,35 +308,63 @@ export async function casesRoutes(app: FastifyInstance) {
     const userId = request.user!.sub
     const caseNumber = await nextCaseNumber()
 
-    const created = await prisma.case.create({
-      data: {
-        caseNumber,
-        fullName: body.fullName,
-        alias: body.alias,
-        approxAge: body.approxAge,
-        caseType: body.caseType,
-        dni: body.dni,
-        sex: body.sex,
-        phone: body.phone,
-        healthStatus: body.healthStatus,
-        currentSleepSpot: body.currentSleepSpot,
-        dayZone: body.dayZone,
-        stayType: body.stayType,
-        wantsToWork: body.wantsToWork,
-        workAptitude: body.workAptitude,
-        legalSituation: body.legalSituation,
-        substanceUse: body.substanceUse,
-        mainPhotoUrl: body.mainPhotoUrl,
-        createdBy: userId,
-        locations: { create: { lat: body.location.lat, lng: body.location.lng, recordedBy: userId } },
-        needs: body.needs?.length ? { create: body.needs } : undefined,
-        skills: body.skills?.length ? { create: body.skills } : undefined,
-        photos: body.photoUrls?.length
-          ? { create: body.photoUrls.map((url) => ({ url, uploadedBy: userId })) }
-          : undefined,
-        statusHistory: { create: { toStatus: "activo", changedBy: userId } },
-      },
-      include: CASE_DETAIL_INCLUDE,
+    // Los integrantes adicionales (pareja/grupo familiar) necesitan el id
+    // del caso ya creado para poder cargar sus propias necesidades/
+    // habilidades (CaseNeed/CaseSkill requieren caseId además de
+    // caseMemberId) — por eso el caso se crea primero y los integrantes
+    // se agregan después, todo dentro de la misma transacción.
+    const created = await prisma.$transaction(async (tx) => {
+      const caseRecord = await tx.case.create({
+        data: {
+          caseNumber,
+          fullName: body.fullName,
+          alias: body.alias,
+          approxAge: body.approxAge,
+          caseType: body.caseType,
+          dni: body.dni,
+          sex: body.sex,
+          phone: body.phone,
+          healthStatus: body.healthStatus,
+          currentSleepSpot: body.currentSleepSpot,
+          dayZone: body.dayZone,
+          stayType: body.stayType,
+          wantsToWork: body.wantsToWork,
+          workAptitude: body.workAptitude,
+          legalSituation: body.legalSituation,
+          substanceUse: body.substanceUse,
+          mainPhotoUrl: body.mainPhotoUrl,
+          createdBy: userId,
+          locations: { create: { lat: body.location.lat, lng: body.location.lng, recordedBy: userId } },
+          needs: body.needs?.length ? { create: body.needs } : undefined,
+          skills: body.skills?.length ? { create: body.skills } : undefined,
+          photos: body.photoUrls?.length
+            ? { create: body.photoUrls.map((url) => ({ url, uploadedBy: userId })) }
+            : undefined,
+          statusHistory: { create: { toStatus: "activo", changedBy: userId } },
+        },
+      })
+
+      for (const m of body.members ?? []) {
+        await tx.caseMember.create({
+          data: {
+            caseId: caseRecord.id,
+            fullName: m.fullName,
+            alias: m.alias,
+            approxAge: m.approxAge,
+            dni: m.dni,
+            sex: m.sex,
+            healthStatus: m.healthStatus,
+            wantsToWork: m.wantsToWork,
+            workAptitude: m.workAptitude,
+            legalSituation: m.legalSituation,
+            substanceUse: m.substanceUse,
+            needs: m.needs?.length ? { create: m.needs.map((n) => ({ ...n, caseId: caseRecord.id })) } : undefined,
+            skills: m.skills?.length ? { create: m.skills.map((s) => ({ ...s, caseId: caseRecord.id })) } : undefined,
+          },
+        })
+      }
+
+      return tx.case.findUniqueOrThrow({ where: { id: caseRecord.id }, include: CASE_DETAIL_INCLUDE })
     })
     return reply.code(201).send(await serializeCaseDetail(created))
   })
@@ -372,6 +470,106 @@ export async function casesRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requirePermission("cases.write")] },
     async (request) => {
       const { id, skillId } = request.params as { id: string; skillId: string }
+      await prisma.caseSkill.delete({ where: { id: skillId } })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return serializeCaseDetail(updated)
+    },
+  )
+
+  // ── Integrantes (pareja / grupo familiar) ──
+
+  app.post(
+    "/cases/:id/members",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const body = memberInputSchema.parse(request.body)
+      await prisma.caseMember.create({
+        data: {
+          caseId: id,
+          fullName: body.fullName,
+          alias: body.alias,
+          approxAge: body.approxAge,
+          dni: body.dni,
+          sex: body.sex,
+          healthStatus: body.healthStatus,
+          wantsToWork: body.wantsToWork,
+          workAptitude: body.workAptitude,
+          legalSituation: body.legalSituation,
+          substanceUse: body.substanceUse,
+          needs: body.needs?.length ? { create: body.needs.map((n) => ({ ...n, caseId: id })) } : undefined,
+          skills: body.skills?.length ? { create: body.skills.map((s) => ({ ...s, caseId: id })) } : undefined,
+        },
+      })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return reply.code(201).send(await serializeCaseDetail(updated))
+    },
+  )
+
+  app.patch(
+    "/cases/:id/members/:memberId",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request) => {
+      const { id, memberId } = request.params as { id: string; memberId: string }
+      const body = updateMemberSchema.parse(request.body)
+      await prisma.caseMember.update({ where: { id: memberId }, data: body })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return serializeCaseDetail(updated)
+    },
+  )
+
+  app.delete(
+    "/cases/:id/members/:memberId",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request) => {
+      const { id, memberId } = request.params as { id: string; memberId: string }
+      await prisma.caseMember.delete({ where: { id: memberId } })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return serializeCaseDetail(updated)
+    },
+  )
+
+  app.post(
+    "/cases/:id/members/:memberId/needs",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request, reply) => {
+      const { id, memberId } = request.params as { id: string; memberId: string }
+      const body = needInputSchema.parse(request.body)
+      await prisma.caseNeed.create({ data: { caseId: id, caseMemberId: memberId, ...body } })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return reply.code(201).send(await serializeCaseDetail(updated))
+    },
+  )
+
+  app.patch(
+    "/cases/:id/members/:memberId/needs/:needId",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request) => {
+      const { id, needId } = request.params as { id: string; memberId: string; needId: string }
+      const { resolved } = z.object({ resolved: z.boolean() }).parse(request.body)
+      await prisma.caseNeed.update({ where: { id: needId }, data: { resolvedAt: resolved ? new Date() : null } })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return serializeCaseDetail(updated)
+    },
+  )
+
+  app.post(
+    "/cases/:id/members/:memberId/skills",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request, reply) => {
+      const { id, memberId } = request.params as { id: string; memberId: string }
+      const body = skillInputSchema.parse(request.body)
+      await prisma.caseSkill.create({ data: { caseId: id, caseMemberId: memberId, ...body } })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return reply.code(201).send(await serializeCaseDetail(updated))
+    },
+  )
+
+  app.delete(
+    "/cases/:id/members/:memberId/skills/:skillId",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request) => {
+      const { id, skillId } = request.params as { id: string; memberId: string; skillId: string }
       await prisma.caseSkill.delete({ where: { id: skillId } })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)

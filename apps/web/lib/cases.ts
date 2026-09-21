@@ -115,6 +115,7 @@ export interface CaseListItem {
   feasibility: CaseFeasibility | null
   createdAt: string
   openNeedsCount: number
+  memberCount: number
 }
 
 export interface CaseNeedItem {
@@ -162,6 +163,29 @@ export interface CaseStatusHistoryItem {
   changedBy: BasicUser | null
 }
 
+/**
+ * Integrante adicional de un caso "pareja" / "grupo_familiar" — el
+ * referente del grupo vive en los campos de CaseDetail de arriba, el
+ * resto de las personas del grupo son CaseMember, cada una con sus
+ * propios datos, diagnóstico y necesidades/habilidades.
+ */
+export interface CaseMemberItem {
+  id: string
+  fullName: string
+  alias: string | null
+  approxAge: number | null
+  dni: string | null
+  sex: string | null
+  healthStatus: string | null
+  wantsToWork: boolean | null
+  workAptitude: string | null
+  legalSituation: string | null
+  substanceUse: string | null
+  createdAt: string
+  needs: CaseNeedItem[]
+  skills: CaseSkillItem[]
+}
+
 export interface CaseDetail {
   id: string
   caseNumber: string
@@ -194,6 +218,7 @@ export interface CaseDetail {
   skills: CaseSkillItem[]
   needs: CaseNeedItem[]
   statusHistory: CaseStatusHistoryItem[]
+  members: CaseMemberItem[]
 }
 
 export const listCases = (status?: CaseStatus) =>
@@ -222,6 +247,23 @@ export interface CreateCaseInput {
   needs?: { category: NeedCategory; urgency: NeedUrgency; notes?: string }[]
   skills?: { skillLabel: string; level?: string }[]
   photoUrls?: string[]
+  // Resto del grupo cuando caseType es "pareja" / "grupo_familiar".
+  members?: CreateCaseMemberInput[]
+}
+
+export interface CreateCaseMemberInput {
+  fullName: string
+  alias?: string
+  approxAge?: number
+  dni?: string
+  sex?: string
+  healthStatus?: string
+  wantsToWork?: boolean
+  workAptitude?: string
+  legalSituation?: string
+  substanceUse?: string
+  needs?: { category: NeedCategory; urgency: NeedUrgency; notes?: string }[]
+  skills?: { skillLabel: string; level?: string }[]
 }
 
 export const createCase = (data: CreateCaseInput) =>
@@ -267,3 +309,46 @@ export const addCaseSkill = (id: string, data: { skillLabel: string; level?: str
 
 export const deleteCaseSkill = (id: string, skillId: string) =>
   apiFetch(`/api/cases/${id}/skills/${skillId}`, { method: "DELETE" })
+
+// ── Integrantes ──
+
+export const addCaseMember = (id: string, data: CreateCaseMemberInput) =>
+  apiFetch(`/api/cases/${id}/members`, { method: "POST", body: JSON.stringify(data) }) as Promise<CaseDetail>
+
+export const updateCaseMember = (
+  id: string,
+  memberId: string,
+  data: Partial<Omit<CreateCaseMemberInput, "needs" | "skills">>,
+) =>
+  apiFetch(`/api/cases/${id}/members/${memberId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  }) as Promise<CaseDetail>
+
+export const deleteCaseMember = (id: string, memberId: string) =>
+  apiFetch(`/api/cases/${id}/members/${memberId}`, { method: "DELETE" }) as Promise<CaseDetail>
+
+export const addCaseMemberNeed = (
+  id: string,
+  memberId: string,
+  data: { category: NeedCategory; urgency: NeedUrgency; notes?: string },
+) =>
+  apiFetch(`/api/cases/${id}/members/${memberId}/needs`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<CaseDetail>
+
+export const resolveCaseMemberNeed = (id: string, memberId: string, needId: string, resolved: boolean) =>
+  apiFetch(`/api/cases/${id}/members/${memberId}/needs/${needId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ resolved }),
+  }) as Promise<CaseDetail>
+
+export const addCaseMemberSkill = (id: string, memberId: string, data: { skillLabel: string; level?: string }) =>
+  apiFetch(`/api/cases/${id}/members/${memberId}/skills`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<CaseDetail>
+
+export const deleteCaseMemberSkill = (id: string, memberId: string, skillId: string) =>
+  apiFetch(`/api/cases/${id}/members/${memberId}/skills/${skillId}`, { method: "DELETE" })

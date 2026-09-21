@@ -749,8 +749,36 @@ model Case {
   checkins        Checkin[]
   projects        ProjectCase[]
   expenses        ProjectExpense[]
+  members         CaseMember[]
 
   @@map("cases")
+}
+
+// Integrantes adicionales de un caso "pareja" / "grupo_familiar" — el
+// primer integrante (el "referente" del grupo) sigue viviendo en los
+// campos de Case de arriba, sin cambios, para no tocar los casos ya
+// cargados. CaseMember cubre al RESTO del grupo: cada uno con sus
+// propios datos, patologías/diagnóstico y necesidades/habilidades.
+model CaseMember {
+  id             String   @id @default(uuid())
+  caseId         String   @map("case_id")
+  fullName       String   @map("full_name")
+  alias          String?
+  approxAge      Int?     @map("approx_age")
+  dni            String?
+  sex            String?
+  healthStatus   String?  @map("health_status")
+  wantsToWork    Boolean? @map("wants_to_work")
+  workAptitude   String?  @map("work_aptitude")
+  legalSituation String?  @map("legal_situation")
+  substanceUse   String?  @map("substance_use")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  case  Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  needs CaseNeed[]
+  skills CaseSkill[]
+
+  @@map("case_members")
 }
 
 model CaseContactHistory {
@@ -795,26 +823,30 @@ model CasePhoto {
 }
 
 model CaseSkill {
-  id         String  @id @default(uuid())
-  caseId     String  @map("case_id")
-  skillLabel String  @map("skill_label")
-  level      String?
+  id           String  @id @default(uuid())
+  caseId       String  @map("case_id")
+  caseMemberId String? @map("case_member_id") // null = del caso/referente; seteado = de un integrante puntual
+  skillLabel   String  @map("skill_label")
+  level        String?
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case   Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  member CaseMember? @relation(fields: [caseMemberId], references: [id], onDelete: Cascade)
 
   @@map("case_skills")
 }
 
 model CaseNeed {
-  id         String       @id @default(uuid())
-  caseId     String       @map("case_id")
-  category   NeedCategory
-  urgency    NeedUrgency
-  notes      String?
-  resolvedAt DateTime?    @map("resolved_at")
-  createdAt  DateTime     @default(now()) @map("created_at")
+  id           String       @id @default(uuid())
+  caseId       String       @map("case_id")
+  caseMemberId String?      @map("case_member_id") // null = necesidad del grupo/referente; seteado = de un integrante puntual
+  category     NeedCategory
+  urgency      NeedUrgency
+  notes        String?
+  resolvedAt   DateTime?    @map("resolved_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case   Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  member CaseMember? @relation(fields: [caseMemberId], references: [id], onDelete: Cascade)
 
   @@map("case_needs")
 }

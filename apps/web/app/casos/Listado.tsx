@@ -3,11 +3,16 @@
 import { useEffect, useState } from "react"
 import {
   addCaseContact,
+  addCaseMember,
+  addCaseMemberNeed,
+  addCaseMemberSkill,
   addCaseNeed,
   CASE_STATUS_LABEL,
   CASE_STATUSES,
   CASE_TYPE_LABEL,
   changeCaseStatus,
+  deleteCaseMember,
+  deleteCaseMemberSkill,
   FEASIBILITY_LABEL,
   FEASIBILITIES,
   getCase,
@@ -16,12 +21,14 @@ import {
   NEED_CATEGORY_LABEL,
   NEED_URGENCIES,
   NEED_URGENCY_LABEL,
+  resolveCaseMemberNeed,
   resolveCaseNeed,
   updateCase,
   VIABILITY_LABEL,
   VIABILITIES,
   type CaseDetail,
   type CaseListItem,
+  type CaseMemberItem,
   type CaseStatus,
   type NeedCategory,
   type NeedUrgency,
@@ -108,6 +115,7 @@ export function Listado({ canWrite, openCaseId }: { canWrite: boolean; openCaseI
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-cream/50">
               <span>{CASE_TYPE_LABEL[c.caseType]}</span>
+              {c.memberCount > 0 && <span>· +{c.memberCount} integrante(s)</span>}
               {c.viability && <span>· Viabilidad: {VIABILITY_LABEL[c.viability]}</span>}
               {c.openNeedsCount > 0 && <span className="text-orange">· {c.openNeedsCount} necesidad(es) abiertas</span>}
               <span className="ml-auto">{formatDateTime(c.createdAt)}</span>
@@ -386,6 +394,10 @@ function CaseDetailModal({
           )}
         </div>
 
+        {(detail.caseType !== "individual" || detail.members.length > 0) && (
+          <MembersSection id={id} members={detail.members} canWrite={canWrite} onChanged={() => { load(); onChanged() }} />
+        )}
+
         <div className="mb-2">
           <h3 className="mb-2 text-sm font-semibold text-cream">Bitácora de contactos</h3>
           <div className="max-h-40 space-y-1.5 overflow-y-auto">
@@ -428,6 +440,329 @@ function CaseDetailModal({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Fase J.1 — el resto del grupo (pareja / grupo familiar) además del
+ * referente. Cada integrante tiene sus propios datos, diagnóstico y
+ * necesidades/habilidades — antes no había dónde cargarlos.
+ */
+function MembersSection({
+  id,
+  members,
+  canWrite,
+  onChanged,
+}: {
+  id: string
+  members: CaseMemberItem[]
+  canWrite: boolean
+  onChanged: () => void
+}) {
+  const [showAdd, setShowAdd] = useState(false)
+
+  return (
+    <div className="mb-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-cream">Integrantes del grupo ({members.length})</h3>
+        {canWrite && (
+          <button onClick={() => setShowAdd((v) => !v)} className="text-xs text-yellow hover:underline">
+            {showAdd ? "Cancelar" : "+ Agregar integrante"}
+          </button>
+        )}
+      </div>
+
+      {showAdd && (
+        <AddMemberForm
+          id={id}
+          onDone={() => {
+            setShowAdd(false)
+            onChanged()
+          }}
+        />
+      )}
+
+      <div className="space-y-2">
+        {members.map((m) => (
+          <MemberCard key={m.id} id={id} member={m} canWrite={canWrite} onChanged={onChanged} />
+        ))}
+        {members.length === 0 && !showAdd && (
+          <p className="text-xs text-cream/40">Todavía no se cargó a nadie más del grupo.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MemberCard({
+  id,
+  member,
+  canWrite,
+  onChanged,
+}: {
+  id: string
+  member: CaseMemberItem
+  canWrite: boolean
+  onChanged: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [newNeedCategory, setNewNeedCategory] = useState<NeedCategory>("salud")
+  const [newNeedUrgency, setNewNeedUrgency] = useState<NeedUrgency>("normal")
+  const [newSkill, setNewSkill] = useState("")
+
+  return (
+    <div className="rounded-xl border border-white/15 bg-white/5 p-3">
+      <button onClick={() => setExpanded((v) => !v)} className="flex w-full items-center justify-between text-left">
+        <div>
+          <span className="text-sm font-medium text-cream">{member.fullName}</span>
+          {member.alias && <span className="ml-1.5 text-xs text-cream/50">({member.alias})</span>}
+          {member.approxAge && <span className="ml-1.5 text-xs text-cream/50">· {member.approxAge} años</span>}
+        </div>
+        <span className="text-xs text-cream/40">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-2 text-xs">
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
+            {member.dni && (
+              <>
+                <dt className="text-cream/50">DNI</dt>
+                <dd className="text-cream">{member.dni}</dd>
+              </>
+            )}
+            {member.sex && (
+              <>
+                <dt className="text-cream/50">Sexo</dt>
+                <dd className="text-cream">{member.sex}</dd>
+              </>
+            )}
+            {member.wantsToWork !== null && (
+              <>
+                <dt className="text-cream/50">¿Quiere trabajar?</dt>
+                <dd className="text-cream">{member.wantsToWork ? "Sí" : "No"}</dd>
+              </>
+            )}
+            {member.workAptitude && (
+              <>
+                <dt className="text-cream/50">Aptitud</dt>
+                <dd className="text-cream">{member.workAptitude}</dd>
+              </>
+            )}
+          </dl>
+          {member.healthStatus && (
+            <p>
+              <span className="text-cream/50">Salud:</span> {member.healthStatus}
+            </p>
+          )}
+          {member.legalSituation && (
+            <p>
+              <span className="text-cream/50">Situación legal:</span> {member.legalSituation}
+            </p>
+          )}
+          {member.substanceUse && (
+            <p>
+              <span className="text-cream/50">Consumo:</span> {member.substanceUse}
+            </p>
+          )}
+
+          <div>
+            <p className="mb-1 font-medium text-cream">Necesidades</p>
+            {member.needs.map((n) => (
+              <div key={n.id} className="mb-1 flex items-center justify-between rounded-lg bg-white/5 px-2 py-1.5">
+                <span className={n.resolvedAt ? "text-cream/40 line-through" : "text-cream"}>
+                  {NEED_CATEGORY_LABEL[n.category]} · {NEED_URGENCY_LABEL[n.urgency]}
+                  {n.notes ? ` — ${n.notes}` : ""}
+                </span>
+                {canWrite && (
+                  <button
+                    onClick={async () => {
+                      await resolveCaseMemberNeed(id, member.id, n.id, !n.resolvedAt)
+                      onChanged()
+                    }}
+                    className="text-yellow hover:underline"
+                  >
+                    {n.resolvedAt ? "Reabrir" : "Resolver"}
+                  </button>
+                )}
+              </div>
+            ))}
+            {member.needs.length === 0 && <p className="text-cream/40">Sin necesidades cargadas.</p>}
+            {canWrite && (
+              <div className="mt-1.5 flex gap-1.5">
+                <select
+                  value={newNeedCategory}
+                  onChange={(e) => setNewNeedCategory(e.target.value as NeedCategory)}
+                  className="flex-1 rounded-lg border border-white/20 bg-white/5 px-1.5 py-1 text-cream outline-none focus:border-yellow"
+                >
+                  {NEED_CATEGORIES.map((c) => (
+                    <option key={c} value={c} className="bg-purple-deep">
+                      {NEED_CATEGORY_LABEL[c]}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={newNeedUrgency}
+                  onChange={(e) => setNewNeedUrgency(e.target.value as NeedUrgency)}
+                  className="flex-1 rounded-lg border border-white/20 bg-white/5 px-1.5 py-1 text-cream outline-none focus:border-yellow"
+                >
+                  {NEED_URGENCIES.map((u) => (
+                    <option key={u} value={u} className="bg-purple-deep">
+                      {NEED_URGENCY_LABEL[u]}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={async () => {
+                    await addCaseMemberNeed(id, member.id, { category: newNeedCategory, urgency: newNeedUrgency })
+                    onChanged()
+                  }}
+                  className="rounded-lg bg-yellow px-2 font-semibold text-purple-deep"
+                >
+                  +
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="mb-1 font-medium text-cream">Habilidades</p>
+            {member.skills.map((s) => (
+              <div key={s.id} className="mb-1 flex items-center justify-between rounded-lg bg-white/5 px-2 py-1.5">
+                <span className="text-cream">{s.skillLabel}</span>
+                {canWrite && (
+                  <button
+                    onClick={async () => {
+                      await deleteCaseMemberSkill(id, member.id, s.id)
+                      onChanged()
+                    }}
+                    className="text-orange hover:underline"
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
+            ))}
+            {member.skills.length === 0 && <p className="text-cream/40">Sin habilidades cargadas.</p>}
+            {canWrite && (
+              <div className="mt-1.5 flex gap-1.5">
+                <input
+                  value={newSkill}
+                  onChange={(e) => setNewSkill(e.target.value)}
+                  placeholder="Ej: electricista"
+                  className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-cream outline-none focus:border-yellow"
+                />
+                <button
+                  onClick={async () => {
+                    if (!newSkill.trim()) return
+                    await addCaseMemberSkill(id, member.id, { skillLabel: newSkill.trim() })
+                    setNewSkill("")
+                    onChanged()
+                  }}
+                  className="rounded-lg bg-yellow px-2 font-semibold text-purple-deep"
+                >
+                  +
+                </button>
+              </div>
+            )}
+          </div>
+
+          {canWrite && (
+            <button
+              onClick={async () => {
+                await deleteCaseMember(id, member.id)
+                onChanged()
+              }}
+              className="text-orange hover:underline"
+            >
+              Quitar integrante
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AddMemberForm({ id, onDone }: { id: string; onDone: () => void }) {
+  const [fullName, setFullName] = useState("")
+  const [alias, setAlias] = useState("")
+  const [approxAge, setApproxAge] = useState("")
+  const [dni, setDni] = useState("")
+  const [sex, setSex] = useState("")
+  const [healthStatus, setHealthStatus] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  return (
+    <div className="mb-3 rounded-xl border border-white/15 bg-white/5 p-3">
+      {error && <p className="mb-2 text-xs text-orange">{error}</p>}
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <input
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          placeholder="Nombre completo *"
+          className="col-span-2 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+        />
+        <input
+          value={alias}
+          onChange={(e) => setAlias(e.target.value)}
+          placeholder="Alias"
+          className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+        />
+        <input
+          value={approxAge}
+          onChange={(e) => setApproxAge(e.target.value.replace(/\D/g, ""))}
+          placeholder="Edad aprox."
+          inputMode="numeric"
+          className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+        />
+        <input
+          value={dni}
+          onChange={(e) => setDni(e.target.value)}
+          placeholder="DNI"
+          inputMode="numeric"
+          className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+        />
+        <input
+          value={sex}
+          onChange={(e) => setSex(e.target.value)}
+          placeholder="Sexo"
+          className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+        />
+        <textarea
+          value={healthStatus}
+          onChange={(e) => setHealthStatus(e.target.value)}
+          placeholder="Estado de salud observado"
+          rows={2}
+          className="col-span-2 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+        />
+      </div>
+      <button
+        disabled={saving || fullName.trim().length < 2}
+        onClick={async () => {
+          setSaving(true)
+          setError(null)
+          try {
+            await addCaseMember(id, {
+              fullName: fullName.trim(),
+              alias: alias.trim() || undefined,
+              approxAge: approxAge ? Number(approxAge) : undefined,
+              dni: dni.trim() || undefined,
+              sex: sex.trim() || undefined,
+              healthStatus: healthStatus.trim() || undefined,
+            })
+            onDone()
+          } catch (e: any) {
+            setError(e.message ?? "No se pudo agregar el integrante")
+          } finally {
+            setSaving(false)
+          }
+        }}
+        className="rounded-lg bg-yellow px-3 py-1.5 text-xs font-semibold text-purple-deep disabled:opacity-50"
+      >
+        {saving ? "Guardando..." : "Guardar integrante"}
+      </button>
     </div>
   )
 }
