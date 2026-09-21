@@ -1,11 +1,10 @@
 # PLAN — Fase K: Voluntariado, Presentismo, Cocina, Casos, Stock y Analítica
 
-> Estado: **F + C + A + B + D entregados y en producción (21/09/2026)**. Este
-> documento traduce el pedido de Josecito (21/09/2026) a diseño técnico
-> concreto, contrastado contra el schema y las rutas YA existentes (no se
-> repite trabajo hecho). Sigue en **E) Relevamiento** (KPI de carga +
-> buscador anti-duplicados). Actualizar el estado de cada bloque a medida
-> que se entrega.
+> Estado: **F + C + A + B + D + E + G entregados y en producción (21/09/2026)
+> — Fase K completa**, salvo los dos pendientes de Josecito que se explican
+> abajo (Resend y watchdog). Este documento traduce el pedido de Josecito
+> (21/09/2026) a diseño técnico concreto, contrastado contra el schema y
+> las rutas YA existentes (no se repite trabajo hecho).
 >
 > ⚠️ **Pendiente de vos, para el final de Fase K** (así lo pediste — "dejamos
 > para el final de las implementaciones resend y el watchdog"): 1) crear la
@@ -185,18 +184,26 @@ sus asignaciones) — los cinco casos pasaron antes de aplicar en producción.
 
 ---
 
-## E) Relevamiento — KPI de carga + buscador (EXTIENDE Fase J)
+## E) Relevamiento — KPI de carga + buscador (EXTIENDE Fase J) ✅ ENTREGADO (21/09/2026)
 
-- **Timestamp de carga**: agregar `Case.surveyStartedAt` (se setea en el
-  frontend al abrir el formulario "Nuevo caso", no al guardar) — el KPI
-  "tiempo de carga" sale de `createdAt - surveyStartedAt`. Si el formulario
-  se abre y se abandona sin guardar, no genera dato (correcto, no hay caso
-  creado).
-- **Buscador anti-duplicados**: `GET /api/cases/search?q=` (por nombre, alias
-  o DNI) para que el que releva pueda chequear "¿esta persona ya está
-  cargada?" antes de crear un caso nuevo — si aparece, entra a ese caso
-  existente y agrega una entrada en `CaseContactHistory` en vez de duplicar.
-  Se engancha como primer paso del flujo "Nuevo caso" en el frontend.
+**Construido**: `Case.surveyStartedAt` (nullable, la setea el FRONTEND al
+abrir el formulario "Nuevo caso" — no el backend al guardar), así el KPI
+"tiempo de carga" sale de `createdAt - surveyStartedAt`. Si el formulario
+se abre y se abandona sin guardar, no genera dato (correcto, no llegó a
+existir un `Case`).
+
+`GET /api/cases/search?q=` — busca por nombre, alias o DNI, coincidencia
+parcial insensible a mayúsculas, tanto en el/la referente del caso como en
+cualquier `CaseMember` del grupo (si matchea por un integrante, la
+respuesta lo marca con `matchedMember` para que se entienda por qué
+apareció ese caso). Se enganchó como paso "buscar" — nuevo primer paso del
+wizard de "Nuevo caso" en el frontend, antes de "básicos" — con búsqueda
+con debounce de 350ms; si aparece una coincidencia, un toque lleva
+directo al caso existente en el listado (`Listado` ya tenía un prop
+`openCaseId` sin usar, aprovechado acá) en vez de duplicar.
+
+**Verificación antes de tocar producción**: migración probada contra
+Postgres local (diff limpio) + `tsc`/`next build` limpios en ambas apps.
 
 ---
 
@@ -252,24 +259,38 @@ las rutas nuevas devolviendo 401 (auth) en vez de 404.
 
 ---
 
-## G) Analítica e indicadores (NUEVO módulo completo)
+## G) Analítica e indicadores (NUEVO módulo completo) ✅ ENTREGADO (21/09/2026)
 
-Hoy `apps/api/src/modules/analytics/` solo tiene un `README.md` — no hay una
-sola ruta construida. Se arma `GET /api/analytics/*` (permiso ya existe:
-`analytics.read`) con, como mínimo:
+**Construido** — sin tablas propias, todo agregación sobre lo que ya cargan
+los bloques anteriores:
 
-- **Casos**: edad promedio, distribución por sexo, tiempo de permanencia
-  promedio (días desde `createdAt` hasta cierre o hasta hoy si sigue activo),
-  habilidades más recurrentes (agrupa `CaseSkill.skillLabel`), cantidad con/
-  sin teléfono cargado (campo `phone`), cantidad por `viability` (alta/media/
-  baja probabilidad de extracción).
-- **Presentismo**: ranking de usuarios por asistencias confirmadas
-  (`WeeklyAvailability.confirmedPresent`) en los últimos N domingos.
-- **Producción**: bandejas entregadas y litros de té/café/mate cocido por
-  domingo (suma de `FieldDelivery` agrupada por semana).
-- Vista nueva en el frontend (`/analitica` o una pestaña dentro de
-  `/administracion`) con tarjetas + la librería de gráficos ya usada en el
-  resto de la plataforma.
+- `GET /api/analytics/casos`: edad promedio, distribución por sexo, tiempo
+  de permanencia promedio (días desde `createdAt` hasta la última
+  transición a `cerrado` en `CaseStatusHistory`, o hasta hoy si el caso
+  sigue abierto), habilidades más recurrentes (`CaseSkill.skillLabel`
+  agrupado), cantidad con/sin teléfono cargado, cantidad por `viability`.
+- `GET /api/analytics/presentismo?weeks=`: ranking de usuarios por
+  asistencias confirmadas (`WeeklyAvailability.confirmedPresent`) en los
+  últimos N domingos (default 8).
+- `GET /api/analytics/produccion?weeks=`: bandejas/litros entregados por
+  domingo, sumando `FieldDelivery` (ligado a `Checkin` tipo
+  `entregando_viandas`) agrupado por semana e ítem — la semana se calcula
+  truncando `Checkin.createdAt` al domingo anterior, ya que `FieldDelivery`
+  no guarda su propio `weekStartDate`.
+- Vista nueva `/analitica` (página propia, no pestaña de administración —
+  es un módulo de lectura para todo el equipo con `analytics.read`, no una
+  tarea administrativa puntual), con tarjetas de KPI + gráficos (`recharts`,
+  ya era dependencia del proyecto, sin uso hasta ahora) — enganchada en la
+  barra de navegación (`AppShell`).
+
+**Verificación antes de tocar producción**: sin migración (no hay tablas
+nuevas) — se verificó con un script funcional contra Postgres local que
+replica exactamente la lógica de los tres endpoints sobre datos sembrados
+a mano (edad promedio, distribución por sexo, permanencia con caso
+cerrado/activo, habilidades repetidas, ranking de presentismo con y sin
+confirmar, producción agrupada por semana e ítem con filtro por tipo de
+checkin) — los siete chequeos pasaron antes de escribir las rutas
+definitivas. `tsc` y `next build` limpios en ambas apps.
 
 ---
 
@@ -303,7 +324,9 @@ cerrado" a efectos del email) se resolvió al construir D: `CaseStatus.cerrado`
    producción el 21/09/2026.**
 4. ~~**D (asignación de casos con roles + notificaciones)**~~ — **entregado
    y en producción el 21/09/2026.**
-5. **E (KPI de relevamiento + buscador)** — siguiente.
-6. **G (analítica)** — al final, porque consume datos de todos los
-   anteriores (mientras más bloques estén cargando datos reales, más útil
-   sale el tablero).
+5. ~~**E (KPI de relevamiento + buscador)**~~ — **entregado y en producción
+   el 21/09/2026.**
+6. ~~**G (analítica)**~~ — **entregado y en producción el 21/09/2026.**
+
+**Con esto, Fase K queda completa** salvo los dos pendientes explícitos de
+Josecito (Resend y watchdog, ver el aviso al principio de este documento).
