@@ -46,17 +46,14 @@ async function main() {
 
   app.get("/health", async () => ({ ok: true, service: "vida-solidaria-api" }))
 
-  await app.register(authRoutes, { prefix: "/api" })
-  await app.register(usersRoutes, { prefix: "/api" })
-  await app.register(projectsRoutes, { prefix: "/api" })
-  await app.register(uploadsRoutes, { prefix: "/api" })
-  await app.register(fieldOpsRoutes, { prefix: "/api" })
-  await app.register(logisticsRoutes, { prefix: "/api" })
-  await app.register(casesRoutes, { prefix: "/api" })
-
-  // TODO (Módulo 4+): registrar acá finance.routes (donaciones/compras/rendición).
-  // logistics/field-ops/cases todavía sin Socket.IO (ver notas en esos módulos).
-
+  // IMPORTANTE: setErrorHandler tiene que registrarse ACÁ, antes de los
+  // app.register(...) de las rutas de abajo. En Fastify v5, un handler
+  // seteado en la instancia raíz DESPUÉS de registrar los plugins hijos
+  // (cada `register` crea su propio contexto encapsulado) no siempre
+  // llega a interceptar los errores lanzados dentro de esos plugins —
+  // se probó en un repro aislado: con el registro en este orden (antes
+  // de los `register`) los ZodError de cualquier ruta llegan acá; en el
+  // orden viejo (después), Fastify devolvía su 500 crudo por defecto.
   app.setErrorHandler((error: FastifyError, request, reply) => {
     // Bug arrastrado desde el Módulo 1: TODAS las rutas validan el body con
     // `xxxSchema.parse(request.body)` (Zod), no con el validador de schema
@@ -78,6 +75,17 @@ async function main() {
     request.log.error(error)
     return reply.code(500).send({ error: "Error interno" })
   })
+
+  await app.register(authRoutes, { prefix: "/api" })
+  await app.register(usersRoutes, { prefix: "/api" })
+  await app.register(projectsRoutes, { prefix: "/api" })
+  await app.register(uploadsRoutes, { prefix: "/api" })
+  await app.register(fieldOpsRoutes, { prefix: "/api" })
+  await app.register(logisticsRoutes, { prefix: "/api" })
+  await app.register(casesRoutes, { prefix: "/api" })
+
+  // TODO (Módulo 4+): registrar acá finance.routes (donaciones/compras/rendición).
+  // logistics/field-ops/cases todavía sin Socket.IO (ver notas en esos módulos).
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" })
   console.log(`✅ API escuchando en http://0.0.0.0:${env.PORT}`)
