@@ -38,6 +38,13 @@ const envSchema = z.object({
   // subidos (ver modules/uploads/uploads.routes.ts). No confundir con
   // NEXT_PUBLIC_API_URL del frontend, que apunta a lo mismo desde afuera.
   PUBLIC_API_URL: z.string().default("http://localhost:4000"),
+
+  // Fase K: envío de emails (bienvenida de voluntarios, alertas de stock
+  // bajo, notificaciones de casos). Opcional a propósito — sin esta clave el
+  // helper de `lib/email.ts` solo loguea y no rompe nada (ver ese archivo).
+  // Cuando Josecito cree la cuenta en Resend, esto se completa en el .env.
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default("Vida Solidaria <notificaciones@vidasolidariamdp.com>"),
 })
 
 const parsed = envSchema.safeParse(process.env)

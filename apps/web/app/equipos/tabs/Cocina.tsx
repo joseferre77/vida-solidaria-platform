@@ -5,6 +5,8 @@ import { listBasicUsers, type BasicUser } from "../../../lib/projects"
 import {
   KITCHEN_STATUS_LABEL,
   KITCHEN_STATUS_ORDER,
+  STOCK_UNIT_LABEL,
+  STOCK_UNITS,
   addKitchenBatchAssignee,
   addKitchenBatchIngredient,
   createKitchenBatch,
@@ -14,10 +16,12 @@ import {
   listStockItems,
   removeKitchenBatchAssignee,
   removeKitchenBatchIngredient,
+  setKitchenBatchResponsible,
   updateKitchenBatchStatus,
   type KitchenBatchItem,
   type KitchenBatchStatus,
   type StockItemItem,
+  type StockUnit,
 } from "../../../lib/logistics"
 
 function formatDateTime(d: string) {
@@ -27,7 +31,9 @@ function formatDateTime(d: string) {
 const STATUS_BADGE: Record<KitchenBatchStatus, string> = {
   preparacion: "bg-white/10 text-cream/80",
   coccion: "bg-orange/20 text-orange",
+  cocina_terminada: "bg-orange/30 text-orange",
   listo_transporte: "bg-yellow/20 text-yellow",
+  camino_punto_encuentro: "bg-yellow/30 text-yellow",
   entregado: "bg-green-500/20 text-green-300",
 }
 
@@ -114,8 +120,14 @@ function NewBatchModal({
 }) {
   const [name, setName] = useState("")
   const [targetServings, setTargetServings] = useState("")
+  const [responsibleUserId, setResponsibleUserId] = useState("")
+  const [users, setUsers] = useState<BasicUser[] | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    listBasicUsers().then(setUsers).catch(() => setUsers([]))
+  }, [])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -126,7 +138,11 @@ function NewBatchModal({
           setSaving(true)
           setError(null)
           try {
-            const batch = await createKitchenBatch({ name: name.trim(), targetServings: Number(targetServings) })
+            const batch = await createKitchenBatch({
+              name: name.trim(),
+              targetServings: Number(targetServings),
+              responsibleUserId: responsibleUserId || undefined,
+            })
             onCreated(batch)
           } catch (err: any) {
             setError(err.message ?? "No se pudo crear el lote")
@@ -149,7 +165,7 @@ function NewBatchModal({
           />
         </label>
 
-        <label className="mb-4 block text-sm">
+        <label className="mb-3 block text-sm">
           <span className="mb-1 block text-cream/70">Porciones objetivo *</span>
           <input
             required
@@ -159,6 +175,24 @@ function NewBatchModal({
             onChange={(e) => setTargetServings(e.target.value)}
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
           />
+        </label>
+
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block text-cream/70">Responsable de esta cocina</span>
+          <select
+            value={responsibleUserId}
+            onChange={(e) => setResponsibleUserId(e.target.value)}
+            className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+          >
+            <option value="" className="bg-purple-deep">
+              Sin asignar todavía
+            </option>
+            {(users ?? []).map((u) => (
+              <option key={u.id} value={u.id} className="bg-purple-deep">
+                {u.name}
+              </option>
+            ))}
+          </select>
         </label>
 
         {error && <p className="mb-3 text-sm text-orange">{error}</p>}
@@ -242,6 +276,29 @@ function BatchDetailModal({
         </p>
 
         {error && <p className="mb-3 text-sm text-orange">{error}</p>}
+
+        {/* Responsable */}
+        <div className="mb-5">
+          <p className="mb-1.5 text-sm text-cream/70">Responsable de esta cocina</p>
+          <select
+            value={batch.responsible?.id ?? ""}
+            onChange={(e) =>
+              setKitchenBatchResponsible(batch.id, e.target.value || null)
+                .then(refresh)
+                .catch((err) => setError(err.message))
+            }
+            className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm text-cream outline-none focus:border-yellow"
+          >
+            <option value="" className="bg-purple-deep">
+              Sin asignar
+            </option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id} className="bg-purple-deep">
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {/* Estado */}
         <div className="mb-5">
@@ -417,43 +474,55 @@ function NewStockItemInline({
   onError: (e: string) => void
 }) {
   const [name, setName] = useState("")
-  const [unit, setUnit] = useState("")
+  const [unit, setUnit] = useState<StockUnit>("kg")
+  const [isReusable, setIsReusable] = useState(false)
   const [saving, setSaving] = useState(false)
 
   return (
-    <div className="flex gap-2">
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Nombre del insumo"
-        className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
-      />
-      <input
-        value={unit}
-        onChange={(e) => setUnit(e.target.value)}
-        placeholder="Unidad (kg, u.)"
-        className="w-24 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
-      />
-      <button
-        disabled={!name.trim() || !unit.trim() || saving}
-        onClick={async () => {
-          setSaving(true)
-          try {
-            const item = await createStockItem({ name: name.trim(), unit: unit.trim() })
-            onCreated(item)
-          } catch (err: any) {
-            onError(err.message ?? "No se pudo crear el insumo")
-          } finally {
-            setSaving(false)
-          }
-        }}
-        className="rounded-lg bg-yellow px-3 py-1.5 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
-      >
-        Crear
-      </button>
-      <button onClick={onCancel} className="text-cream/40 hover:text-cream">
-        ✕
-      </button>
+    <div className="space-y-1.5">
+      <div className="flex gap-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Nombre del insumo"
+          className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
+        />
+        <select
+          value={unit}
+          onChange={(e) => setUnit(e.target.value as StockUnit)}
+          className="w-28 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
+        >
+          {STOCK_UNITS.map((u) => (
+            <option key={u} value={u} className="bg-purple-deep">
+              {STOCK_UNIT_LABEL[u]}
+            </option>
+          ))}
+        </select>
+        <button
+          disabled={!name.trim() || saving}
+          onClick={async () => {
+            setSaving(true)
+            try {
+              const item = await createStockItem({ name: name.trim(), unit, isReusable })
+              onCreated(item)
+            } catch (err: any) {
+              onError(err.message ?? "No se pudo crear el insumo")
+            } finally {
+              setSaving(false)
+            }
+          }}
+          className="rounded-lg bg-yellow px-3 py-1.5 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+        >
+          Crear
+        </button>
+        <button onClick={onCancel} className="text-cream/40 hover:text-cream">
+          ✕
+        </button>
+      </div>
+      <label className="flex items-center gap-1.5 text-xs text-cream/60">
+        <input type="checkbox" checked={isReusable} onChange={(e) => setIsReusable(e.target.checked)} />
+        Es equipamiento reusable (conservadora, termo, olla...) — se presta y vuelve, no se consume
+      </label>
     </div>
   )
 }

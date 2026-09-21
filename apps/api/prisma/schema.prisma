@@ -897,17 +897,67 @@ model DonationIntake {
   @@map("donation_intakes")
 }
 
+enum StockUnit {
+  kg
+  litros
+  unidades
+  paquetes
+  cajas
+}
+
 model StockItem {
-  id            String   @id @default(uuid())
-  name          String
-  unit          String
-  category      String?
-  minStockAlert Decimal? @map("min_stock_alert")
+  id   String @id @default(uuid())
+  // Código legible tipo "ART-0001" (vía Counter "stock_item_code", mismo
+  // patrón que Case.caseNumber/Project.code) — el id automático que pidió
+  // Josecito para el catálogo.
+  code String @unique
+  name String
+  unit StockUnit
+  category String?
+  // Fase K: distingue insumos que se consumen (materia prima, descartables)
+  // de equipamiento que se PRESTA y vuelve (conservadoras, termos, ollas,
+  // cucharones) — este último no se mueve por StockMovement, se rastrea por
+  // custodia (quién lo tiene ahora) en StockCustody.
+  isReusable Boolean @default(false) @map("is_reusable")
+  // Valuación monetaria: costo por unidad — el valor total se calcula
+  // (cantidad actual, que sale de sumar StockMovement × unitCost), nunca se
+  // guarda como campo mutable (misma convención que el resto del ledger).
+  unitCost Decimal? @map("unit_cost")
+  // Punto de pedido (cuándo alertar que hay que comprar/conseguir más) y
+  // punto de reposición (a qué nivel reponer) — dos umbrales distintos,
+  // reemplaza al viejo `minStockAlert` (nunca tuvo datos en producción).
+  reorderPoint  Decimal? @map("reorder_point")
+  restockTarget Decimal? @map("restock_target")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   movements   StockMovement[]
   kitchenUses KitchenBatchIngredient[]
+  custodies   StockCustody[]
 
   @@map("stock_items")
+}
+
+// Fase K: préstamo de equipamiento reusable (StockItem.isReusable = true) a
+// un usuario — ej. "Juan tiene las 3 conservadoras desde el domingo, las
+// devuelve a lo de Lourdes el miércoles". No reemplaza StockMovement (eso
+// sigue siendo el ledger de ingreso/egreso de lo que se consume); esto es
+// puramente "quién tiene qué ahora", con historial de préstamos pasados.
+model StockCustody {
+  id            String    @id @default(uuid())
+  stockItemId   String    @map("stock_item_id")
+  holderUserId  String    @map("holder_user_id")
+  quantity      Decimal   @default(1)
+  notes         String?
+  checkedOutBy  String    @map("checked_out_by")
+  checkedOutAt  DateTime  @default(now()) @map("checked_out_at")
+  returnedAt    DateTime? @map("returned_at")
+  returnedNotes String?   @map("returned_notes")
+
+  stockItem StockItem @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+
+  @@index([stockItemId])
+  @@map("stock_custody")
 }
 
 enum MovementType {
@@ -935,7 +985,14 @@ model StockMovement {
 enum KitchenBatchStatus {
   preparacion
   coccion
-  listo_transporte
+  // Fase K: dos pasos nuevos entre "cocción" y "entregado" — la cocina
+  // terminó de cocinar (cocina_terminada) antes de empezar a cargar las
+  // conservadoras (se reusa el valor existente `listo_transporte`, ver
+  // KITCHEN_STATUS_LABEL en el frontend), y ya en viaje hacia el punto de
+  // encuentro (camino_punto_encuentro) antes de la entrega final.
+  cocina_terminada
+  listo_transporte // relabeled en frontend como "Cargando conservadoras"
+  camino_punto_encuentro
   entregado
 }
 
@@ -945,6 +1002,10 @@ model KitchenBatch {
   targetServings Int                @map("target_servings")
   status         KitchenBatchStatus @default(preparacion)
   createdBy      String             @map("created_by")
+  // Fase K: la persona a cargo de ESTA cocina puntual (distinto de la lista
+  // de `assignees`, que son las personas que ayudan) — pedido de Josecito,
+  // hoy no había forma de marcar "quién responde por este lote".
+  responsibleUserId String?         @map("responsible_user_id")
   createdAt      DateTime           @default(now()) @map("created_at")
 
   ingredients   KitchenBatchIngredient[]
@@ -1150,3 +1211,24 @@ model FinancialReport {
 // ────────────────────────────────────────────────
 // 7. ANALÍTICA — sin tablas propias en v1 (ver ARCHITECTURE.md §4.7)
 // ────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────
+// FASE K — Notificaciones "en el sistema" (campanita en la barra superior)
+// ────────────────────────────────────────────────
+
+// Genérico a propósito (no es solo de Stock): pensado para reusarse en
+// cualquier alerta futura — stock bajo, asignación/cierre de un caso, alta
+// de voluntario aprobada, etc. Ver `apps/api/src/lib/notify.ts`.
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  title     String
+  body      String?
+  link      String?
+  type      String?
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}

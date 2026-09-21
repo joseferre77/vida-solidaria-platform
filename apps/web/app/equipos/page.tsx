@@ -7,8 +7,9 @@ import { Equipos } from "./tabs/Equipos"
 import { Zonas } from "./tabs/Zonas"
 import { Checkins } from "./tabs/Checkins"
 import { Cocina } from "./tabs/Cocina"
+import { Stock } from "./tabs/Stock"
 
-type TabKey = "equipos" | "zonas" | "checkins" | "cocina"
+type TabKey = "equipos" | "zonas" | "checkins" | "cocina" | "stock"
 
 /**
  * Fase I — "Equipos y Secciones": equipos de campo, zonas con asignación
@@ -49,6 +50,7 @@ export default function EquiposPage() {
     { key: "zonas", label: "Zonas", visible: canFieldOps },
     { key: "checkins", label: "Check-ins", visible: canFieldOps },
     { key: "cocina", label: "Cocina", visible: canLogistics },
+    { key: "stock", label: "Stock", visible: canLogistics },
   ].filter((t) => t.visible) as { key: TabKey; label: string; visible: boolean }[]
 
   const currentTab = TABS.some((t) => t.key === activeTab) ? activeTab : TABS[0]?.key
@@ -80,6 +82,7 @@ export default function EquiposPage() {
       {currentTab === "zonas" && <Zonas />}
       {currentTab === "checkins" && <Checkins />}
       {currentTab === "cocina" && <Cocina />}
+      {currentTab === "stock" && <Stock />}
     </main>
   )
 }
