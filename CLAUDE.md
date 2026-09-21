@@ -128,11 +128,31 @@ casos. Detalle completo en `ARCHITECTURE.md` §1.
 
 1. Core & Seguridad ✅ *implementado, ver arriba — falta Google OAuth real*
 2. Gestión de Proyectos ✅ *implementado y desplegado, ver arriba*
-3. CRM Social (Casos)
-4. Logística, Inventario y Stock
-5. Operaciones de Campo (tiempo real)
+3. CRM Social (Casos) — ⚠️ *este índice está desactualizado: el módulo base
+   (Case/CaseMember/fotos/skills/needs/historial) ya está implementado y
+   desplegado (Fase J.1/J.2, ver el archivo de proyecto de Casos si existe
+   por separado). Falta el circuito de asignación con roles y notificaciones
+   — ver `PLAN_FASE_K.md` bloque D.
+4. Logística, Inventario y Stock — ⚠️ *ídem: Cocina (KitchenBatch) y el
+   catálogo de Stock (StockItem/StockMovement) ya existen a nivel schema +
+   rutas básicas (Fase I). Falta ampliar estados de cocina, custodia de
+   equipamiento reusable y carga real del catálogo — ver `PLAN_FASE_K.md`
+   bloques C y F.
+5. Operaciones de Campo (tiempo real) — ⚠️ *ídem: Equipos/Zonas/Check-ins
+   (FieldTeam/Zone/ZoneAssignment/Checkin) ya existen (Fase I). Falta
+   presentismo en dos etapas y equipos semanales — ver `PLAN_FASE_K.md`
+   bloque B.
 6. Finanzas y Donaciones
-7. Analítica y Reporting
+7. Analítica y Reporting — pendiente por completo (el módulo solo tiene un
+   README). Ver `PLAN_FASE_K.md` bloque G.
+
+**Fase K (planificada, sin iniciar, 21/09/2026)**: alta pública de
+voluntarios con aprobación + email, presentismo/equipos semanales, cocina
+con más estados, circuito de casos con roles y notificaciones, KPI de
+relevamiento + buscador anti-duplicados, custodia de stock reusable, y el
+módulo de analítica completo. Diseño completo, decisiones y orden de
+construcción en `PLAN_FASE_K.md` (raíz del repo) — leer ese archivo antes de
+tocar código de cualquiera de estos bloques.
 
 ## Decisiones ya tomadas (no volver a discutir salvo que cambie el contexto)
 
