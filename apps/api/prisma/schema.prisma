@@ -1076,14 +1076,43 @@ model FieldTeam {
   @@map("field_teams")
 }
 
+// Fase K bloque B: los equipos se arman de nuevo cada domingo a partir de
+// quién confirmó asistencia esa semana (ver WeeklyAvailability) — por eso
+// ahora la membresía está atada a una semana puntual (weekStartDate), no es
+// fija en el tiempo. Antes la clave primaria era (teamId, userId); en
+// producción esta tabla está vacía (se confirmó antes de migrar), así que
+// no hace falta backfill: se puede cambiar la forma de la clave directo.
 model FieldTeamMember {
-  teamId String @map("team_id")
-  userId String @map("user_id")
+  id            String   @id @default(uuid())
+  teamId        String   @map("team_id")
+  userId        String   @map("user_id")
+  weekStartDate DateTime @map("week_start_date")
 
   team FieldTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
-  @@id([teamId, userId])
+  @@unique([teamId, userId, weekStartDate])
   @@map("field_team_members")
+}
+
+// Fase K bloque B: intención semanal de cada voluntario/a ("¿venís este
+// domingo?") + confirmación posterior de coordinación. userId es un campo
+// "suelto" (sin @relation a User), mismo criterio que en Checkin/FieldTeamMember
+// — se resuelve con userMapFor()/usersWithPermission() en las rutas, no con
+// un include de Prisma.
+model WeeklyAvailability {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  weekStartDate    DateTime  @map("week_start_date")
+  willAttend       Boolean   @map("will_attend")
+  reason           String?   @map("reason")
+  // null = coordinación todavía no decidió; true/false = ya se definió si
+  // esta persona queda confirmada para el equipo de la semana.
+  confirmedPresent Boolean?  @map("confirmed_present")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@unique([userId, weekStartDate])
+  @@map("weekly_availabilities")
 }
 
 model Zone {
@@ -1113,6 +1142,13 @@ model ZoneAssignment {
 enum CheckinType {
   en_camino
   llegamos
+  // Fase K bloque B: presentismo en dos etapas — primero en el punto de
+  // encuentro fijo (Bv. Marítimo y Av. P. Peralta Ramos 2502), después ya
+  // en la zona asignada. `llegamos` queda como estaba (uso genérico previo
+  // a este bloque) para no romper checkins históricos; los nuevos flujos de
+  // presentismo usan estos dos tipos, más específicos.
+  presente_punto_encuentro
+  presente_zona
   entregando_viandas
   relevando_caso
 }

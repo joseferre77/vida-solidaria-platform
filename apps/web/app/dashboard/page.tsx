@@ -164,6 +164,9 @@ export default function DashboardPage() {
         {(hasPermission(user ?? null, "field_ops.read") || hasPermission(user ?? null, "logistics.read")) && (
           <NavCard label="Equipos y Secciones" href="/equipos" />
         )}
+        {/* Fase K bloque B: sin RoleGate a propósito — cualquier usuario
+            logueado carga su propia intención semanal, no requiere field_ops.* */}
+        <NavCard label="Presentismo" href="/presentismo" />
         {(hasPermission(user ?? null, "projects.admin") ||
           hasPermission(user ?? null, "surveys.manage") ||
           hasPermission(user ?? null, "users.manage")) && (

@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation"
 import { fetchMe, hasPermission, type SessionUser } from "../../lib/auth"
 import { Equipos } from "./tabs/Equipos"
 import { Zonas } from "./tabs/Zonas"
+import { Presentismo } from "./tabs/Presentismo"
 import { Checkins } from "./tabs/Checkins"
 import { Cocina } from "./tabs/Cocina"
 import { Stock } from "./tabs/Stock"
 
-type TabKey = "equipos" | "zonas" | "checkins" | "cocina" | "stock"
+type TabKey = "equipos" | "zonas" | "presentismo" | "checkins" | "cocina" | "stock"
 
 /**
  * Fase I — "Equipos y Secciones": equipos de campo, zonas con asignación
@@ -48,6 +49,7 @@ export default function EquiposPage() {
   const TABS: { key: TabKey; label: string; visible: boolean }[] = [
     { key: "equipos", label: "Equipos", visible: canFieldOps },
     { key: "zonas", label: "Zonas", visible: canFieldOps },
+    { key: "presentismo", label: "Presentismo", visible: canFieldOps },
     { key: "checkins", label: "Check-ins", visible: canFieldOps },
     { key: "cocina", label: "Cocina", visible: canLogistics },
     { key: "stock", label: "Stock", visible: canLogistics },
@@ -80,6 +82,7 @@ export default function EquiposPage() {
 
       {currentTab === "equipos" && <Equipos />}
       {currentTab === "zonas" && <Zonas />}
+      {currentTab === "presentismo" && <Presentismo />}
       {currentTab === "checkins" && <Checkins />}
       {currentTab === "cocina" && <Cocina />}
       {currentTab === "stock" && <Stock />}

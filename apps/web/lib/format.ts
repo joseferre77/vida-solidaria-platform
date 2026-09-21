@@ -69,6 +69,19 @@ export function initials(name: string): string {
     .toUpperCase()
 }
 
+/** Fase K bloque B: domingo por defecto para los selectores de semana de
+ * presentismo/equipos — hoy mismo si hoy es domingo, si no el próximo. Es
+ * solo una sugerencia inicial para no obligar a tocar el date-picker cada
+ * vez; el backend no depende de este cálculo, guarda la fecha que le llega
+ * (igual que ZoneAssignment). */
+export function nextSundayISO(from: Date = new Date()): string {
+  const d = new Date(from)
+  const day = d.getDay() // 0 = domingo
+  const diff = day === 0 ? 0 : 7 - day
+  d.setDate(d.getDate() + diff)
+  return d.toISOString().slice(0, 10)
+}
+
 /** Relativo simple ("hace 5 min", "hace 2 h", "hace 3 d") para feeds de actividad/comentarios. */
 export function timeAgo(value: string | Date): string {
   const date = new Date(value)

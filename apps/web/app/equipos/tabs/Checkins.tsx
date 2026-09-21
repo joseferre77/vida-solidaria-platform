@@ -13,6 +13,8 @@ import {
 const TYPE_LABEL: Record<CheckinType, string> = {
   en_camino: "En camino",
   llegamos: "Llegamos",
+  presente_punto_encuentro: "Presente en punto de encuentro",
+  presente_zona: "Presente en zona",
   entregando_viandas: "Entregando viandas",
   relevando_caso: "Relevando caso",
 }
@@ -20,6 +22,8 @@ const TYPE_LABEL: Record<CheckinType, string> = {
 const TYPE_COLOR: Record<CheckinType, string> = {
   en_camino: "bg-white/10 text-cream/80",
   llegamos: "bg-yellow/20 text-yellow",
+  presente_punto_encuentro: "bg-yellow/20 text-yellow",
+  presente_zona: "bg-purple-400/20 text-purple-200",
   entregando_viandas: "bg-green-500/20 text-green-300",
   relevando_caso: "bg-orange/20 text-orange",
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { listBasicUsers, type BasicUser } from "../../../lib/projects"
+import { nextSundayISO, formatDate } from "../../../lib/format"
 import {
   addFieldTeamMember,
   createFieldTeam,
@@ -13,9 +14,12 @@ import {
 } from "../../../lib/field-ops"
 
 /**
- * Fase I — CRUD de FieldTeam (equipos de campo) + gestión de integrantes.
- * Los equipos son compartidos entre Extracción de calle, Relevamiento y
- * Zonas (un equipo se asigna a una zona por semana en la pestaña Zonas).
+ * Fase K bloque B — CRUD de FieldTeam (equipos de campo, esto no cambia) +
+ * gestión de integrantes AHORA POR SEMANA: un equipo se arma de nuevo cada
+ * domingo según quién confirmó asistencia (ver pestaña "Presentismo"), así
+ * que la lista de integrantes que se ve/edita acá es la de la semana
+ * elegida arriba — no un padrón fijo. El selector arranca en el próximo
+ * domingo (o hoy, si hoy es domingo).
  */
 export function Equipos() {
   const [teams, setTeams] = useState<FieldTeamItem[] | null>(null)
@@ -23,6 +27,7 @@ export function Equipos() {
   const [error, setError] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [managingMembersOf, setManagingMembersOf] = useState<FieldTeamItem | null>(null)
+  const [week, setWeek] = useState(() => nextSundayISO())
 
   function refresh() {
     listFieldTeams()
@@ -39,12 +44,20 @@ export function Equipos() {
 
   if (!teams || !users) return <p className="text-cream/50">Cargando...</p>
 
+  const membersForWeek = (t: FieldTeamItem) => t.members.filter((m) => m.weekStartDate.slice(0, 10) === week)
+
   return (
     <div className="max-w-3xl">
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-xs text-cream/50">
-          {teams.length} {teams.length === 1 ? "equipo" : "equipos"}
-        </p>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-2 text-sm text-cream/70">
+          <span>Semana (domingo)</span>
+          <input
+            type="date"
+            value={week}
+            onChange={(e) => setWeek(e.target.value)}
+            className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-cream outline-none focus:border-yellow"
+          />
+        </label>
         <button
           onClick={() => setShowForm(true)}
           className="rounded-xl bg-yellow px-4 py-2 text-sm font-semibold text-purple-deep hover:opacity-90"
@@ -52,6 +65,12 @@ export function Equipos() {
           + Nuevo equipo
         </button>
       </div>
+
+      <p className="mb-4 text-xs text-cream/50">
+        Mostrando integrantes confirmados para el domingo {formatDate(week)}. {teams.length}{" "}
+        {teams.length === 1 ? "equipo" : "equipos"} en total (los equipos son permanentes; los integrantes se arman
+        semana a semana).
+      </p>
 
       {error && <p className="mb-4 text-sm text-orange">{error}</p>}
 
@@ -74,14 +93,16 @@ export function Equipos() {
               </button>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              {t.members.map((m) => (
+              {membersForWeek(t).map((m) => (
                 <span key={m.id} className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-cream/80">
                   {m.name}
                 </span>
               ))}
-              {t.members.length === 0 && <span className="text-xs text-cream/40">Sin integrantes todavía</span>}
+              {membersForWeek(t).length === 0 && (
+                <span className="text-xs text-cream/40">Sin integrantes confirmados esta semana</span>
+              )}
               <button onClick={() => setManagingMembersOf(t)} className="ml-1 text-xs text-yellow hover:underline">
-                Gestionar integrantes
+                Gestionar integrantes de esta semana
               </button>
             </div>
           </div>
@@ -102,10 +123,10 @@ export function Equipos() {
       {managingMembersOf && (
         <MembersModal
           team={managingMembersOf}
+          weekStartDate={week}
           allUsers={users}
-          onClose={() => setManagingMembersOf(null)}
-          onChanged={(updated) => {
-            setManagingMembersOf(updated)
+          onClose={() => {
+            setManagingMembersOf(null)
             refresh()
           }}
           onError={setError}
@@ -180,34 +201,36 @@ function NewTeamModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
 function MembersModal({
   team,
+  weekStartDate,
   allUsers,
   onClose,
-  onChanged,
   onError,
 }: {
   team: FieldTeamItem
+  weekStartDate: string
   allUsers: BasicUser[]
   onClose: () => void
-  onChanged: (updated: FieldTeamItem) => void
   onError: (e: string) => void
 }) {
   const [pickUserId, setPickUserId] = useState("")
-  const memberIds = new Set(team.members.map((m) => m.id))
+  const [members, setMembers] = useState(() => team.members.filter((m) => m.weekStartDate.slice(0, 10) === weekStartDate))
+  const memberIds = new Set(members.map((m) => m.id))
   const available = allUsers.filter((u) => !memberIds.has(u.id))
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-sm rounded-2xl border border-white/15 bg-purple-deep p-6">
-        <h2 className="mb-4 font-display text-lg font-bold text-yellow">Integrantes de {team.name}</h2>
+        <h2 className="mb-1 font-display text-lg font-bold text-yellow">Integrantes de {team.name}</h2>
+        <p className="mb-4 text-xs text-cream/50">Semana del {formatDate(weekStartDate)}</p>
 
         <div className="mb-4 space-y-1.5">
-          {team.members.map((m) => (
+          {members.map((m) => (
             <div key={m.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-1.5 text-sm text-cream">
               <span>{m.name}</span>
               <button
                 onClick={() => {
-                  removeFieldTeamMember(team.id, m.id)
-                    .then(() => onChanged({ ...team, members: team.members.filter((x) => x.id !== m.id) }))
+                  removeFieldTeamMember(team.id, m.id, weekStartDate)
+                    .then(() => setMembers((prev) => prev.filter((x) => x.id !== m.id)))
                     .catch((e) => onError(e.message))
                 }}
                 className="text-cream/30 hover:text-orange"
@@ -216,7 +239,7 @@ function MembersModal({
               </button>
             </div>
           ))}
-          {team.members.length === 0 && <p className="text-xs text-cream/40">Sin integrantes todavía</p>}
+          {members.length === 0 && <p className="text-xs text-cream/40">Sin integrantes confirmados esta semana</p>}
         </div>
 
         {available.length > 0 && (
@@ -238,9 +261,9 @@ function MembersModal({
             <button
               disabled={!pickUserId}
               onClick={() => {
-                addFieldTeamMember(team.id, pickUserId)
-                  .then((members) => {
-                    onChanged({ ...team, members })
+                addFieldTeamMember(team.id, pickUserId, weekStartDate)
+                  .then((updatedMembers) => {
+                    setMembers(updatedMembers.map((u) => ({ ...u, weekStartDate })))
                     setPickUserId("")
                   })
                   .catch((e) => onError(e.message))

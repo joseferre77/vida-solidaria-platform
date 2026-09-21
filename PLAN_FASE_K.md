@@ -1,15 +1,19 @@
 # PLAN — Fase K: Voluntariado, Presentismo, Cocina, Casos, Stock y Analítica
 
-> Estado: **F + C + A entregados y en producción (21/09/2026)**. Este
+> Estado: **F + C + A + B entregados y en producción (21/09/2026)**. Este
 > documento traduce el pedido de Josecito (21/09/2026) a diseño técnico
 > concreto, contrastado contra el schema y las rutas YA existentes (no se
-> repite trabajo hecho). Sigue en **B) Presentismo y equipos semanales**.
-> Actualizar el estado de cada bloque a medida que se entrega.
+> repite trabajo hecho). Sigue en **D) Circuito de Casos** y **E) Relevamiento**
+> (en paralelo). Actualizar el estado de cada bloque a medida que se entrega.
 >
-> ⚠️ **Pendiente de vos**: todavía falta crear la cuenta de Resend y pasarme
-> la `RESEND_API_KEY` — sin ella, todo el flujo de A funciona (alta, espera,
-> aprobación/rechazo) pero ningún email sale de verdad todavía (se loguea y
-> se omite, sin romper nada — ver `lib/email.ts`).
+> ⚠️ **Pendiente de vos, para el final de Fase K** (así lo pediste — "dejamos
+> para el final de las implementaciones resend y el watchdog"): 1) crear la
+> cuenta de Resend y pasarme la `RESEND_API_KEY` — sin ella, todo lo que
+> manda email (alta de voluntarios de A, lo que sume D) funciona igual pero
+> ningún mail sale de verdad todavía (se loguea y se omite, sin romper nada
+> — ver `lib/email.ts`); 2) decidir qué hacer con el watchdog
+> (`watchdog-deploy.sh`) que quedó corriendo por cron en el servidor desde
+> el incidente del 19-20/09 (ver `DEPLOY.md`).
 
 ## Método
 
@@ -67,35 +71,58 @@ todavía (se loguea y se omite, ver `lib/email.ts`).
 
 ---
 
-## B) Presentismo y equipos semanales (EXTIENDE Fase I)
+## B) Presentismo y equipos semanales (EXTIENDE Fase I) ✅ ENTREGADO (21/09/2026)
 
-**Ya existe**: `FieldTeam` (Equipo 1/2/3…), `FieldTeamMember` (integrantes,
-sin fecha — hoy un equipo es fijo), `Zone` + `ZoneAssignment` (equipo → zona,
-con `weekStartDate`/`weekEndDate` — esto YA es semanal), `Checkin` con tipos
+**Ya existía**: `FieldTeam` (Equipo 1/2/3…), `FieldTeamMember` (integrantes,
+sin fecha — el equipo era fijo), `Zone` + `ZoneAssignment` (equipo → zona,
+con `weekStartDate`/`weekEndDate` — esto YA era semanal), `Checkin` con tipos
 `en_camino / llegamos / entregando_viandas / relevando_caso`.
 
-**Decisión de diseño a confirmar**: hoy `FieldTeamMember` es fijo (un
-voluntario siempre pertenece al mismo equipo). Por lo que describís, la
-composición de cada equipo se arma de nuevo cada domingo según quién
-confirmó asistencia esa semana. Para eso `FieldTeamMember` necesita fecha
-(igual que `ZoneAssignment`), no ser fijo — así el historial ("quién estuvo
-en qué equipo cada domingo") queda registrado y alimenta el ranking de
-usuarios más activos. **¿Confirmás este cambio o preferís mantener equipos
-fijos con excepciones puntuales?**
+**Decisión de diseño confirmada** (quedó resuelta antes de construir este
+bloque): `FieldTeamMember` pasó de fijo a semanal — ahora tiene
+`weekStartDate` y la clave única es `(teamId, userId, weekStartDate)` en vez
+de `(teamId, userId)`. El equipo se arma de nuevo cada domingo según quién
+confirmó asistencia esa semana; el historial ("quién estuvo en qué equipo
+cada domingo") queda registrado y alimenta el ranking de participación del
+bloque G. La tabla estaba vacía en producción al migrar, así que no hizo
+falta backfill.
 
-**Nuevo — dos instancias de presente**:
-1. **Intención semanal** (nuevo modelo `WeeklyAvailability`: usuario, domingo,
-   `willAttend` sí/no + motivo opcional si es no). El usuario la carga
-   durante la semana. Es el insumo para que coordinación arme los equipos.
-2. **Confirmación de coordinación** (sábado/domingo a la mañana): coordinación
-   marca en `WeeklyAvailability.confirmedPresent` si finalmente vino o no
-   (aparte de lo que había dicho), ya con el equipo asignado.
-3. **Presente en punto de encuentro** y **presente en zona**: se resuelven
-   reutilizando `Checkin` (ya tiene user/team/lat/lng/timestamp) agregando
-   dos tipos nuevos al enum: `presente_punto_encuentro` y `presente_zona`
-   (más claros que el actual `llegamos`, que quedaba ambiguo entre las dos
-   cosas). El punto de encuentro fijo es **Bv. Marítimo (Av. Patricio Peralta
-   Ramos) 2502** (verificado — es la puerta del NH Gran Hotel Provincial).
+**Construido**:
+1. **Intención semanal** — modelo nuevo `WeeklyAvailability` (usuario,
+   domingo, `willAttend` sí/no + `reason` opcional si es no). Cada
+   voluntario/a la carga desde **`/presentismo`**, una pantalla nueva y
+   deliberadamente FUERA del permiso `field_ops.*` — cualquier usuario
+   logueado ve y edita ahí su propia intención (mismo criterio que
+   `/notifications`: autogestión de lo propio, sin permiso especial). Es el
+   insumo para que coordinación arme los equipos.
+2. **Confirmación de coordinación** — pestaña nueva **"Presentismo"** dentro
+   de `/equipos` (esta sí atrás de `field_ops.read`/`.write`): lista quién
+   avisó que viene para la semana elegida y permite marcar
+   `WeeklyAvailability.confirmedPresent` (sí/no), ya pensando el equipo.
+   De ahí, coordinación pasa a la pestaña "Equipos" (ahora con selector de
+   semana) para sumar a cada persona confirmada al equipo que le toque esa
+   semana.
+3. **Presente en punto de encuentro** y **presente en zona** — se
+   resolvieron reutilizando `Checkin` (ya tenía user/team/lat/lng/timestamp)
+   con dos tipos nuevos en el enum: `presente_punto_encuentro` y
+   `presente_zona` (más claros que el `llegamos` viejo, que quedaba
+   ambiguo entre las dos cosas — se dejó `llegamos` tal cual para no romper
+   check-ins históricos). El punto de encuentro fijo es **Bv. Marítimo (Av.
+   Patricio Peralta Ramos) 2502** (verificado — es la puerta del NH Gran
+   Hotel Provincial); no se guardó como dato aparte, es una referencia fija
+   para quien registra el check-in en el lugar.
+
+**Endpoints nuevos**: `GET/PUT /api/weekly-availability/me` (autogestión),
+`GET /api/weekly-availability?weekStartDate=` y
+`PATCH /api/weekly-availability/:id/confirm` (coordinación). Los de
+integrantes de equipo (`POST/DELETE /api/field-teams/:id/members`) ahora
+piden `weekStartDate` además de `userId`.
+
+**Verificación antes de tocar producción**: migración probada contra
+Postgres local (diff limpio ida y vuelta) + script funcional (alta de
+disponibilidad, duplicado rechazado por semana, misma persona en un equipo
+en dos semanas distintas, duplicado rechazado en la misma semana, los dos
+check-ins nuevos) — los cinco casos pasaron antes de aplicar en producción.
 
 Con esto, presentismo por usuario/domingo queda armado con datos que además
 alimentan el ranking de participación (bloque G).
@@ -254,11 +281,11 @@ sola ruta construida. Se arma `GET /api/analytics/*` (permiso ya existe:
    21/09/2026.** Sigue pendiente que Josecito cree la cuenta de Resend y
    pase la `RESEND_API_KEY` (no bloqueó nada: el sistema funciona sin
    ella, simplemente no manda los mails hasta que se cargue).
-3. **B (presentismo + equipos semanales)** — siguiente. El más grande de
-   este lote, ya con la pregunta 1 original resuelta (equipos semanales
-   confirmado).
+3. ~~**B (presentismo + equipos semanales)**~~ — **entregado y en
+   producción el 21/09/2026.**
 4. **D (asignación de casos con roles + notificaciones)** y **E (KPI de
-   relevamiento + buscador)** — en paralelo, son independientes entre sí.
+   relevamiento + buscador)** — siguiente, en paralelo, son independientes
+   entre sí.
 5. **G (analítica)** — al final, porque consume datos de todos los
    anteriores (mientras más bloques estén cargando datos reales, más útil
    sale el tablero).

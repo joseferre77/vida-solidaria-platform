@@ -6,11 +6,36 @@ export interface BasicUser {
   email: string
 }
 
+// Fase K bloque B: un integrante ahora está atado a una semana puntual
+// (el equipo se arma de nuevo cada domingo) — por eso cada miembro trae su
+// weekStartDate, y una misma persona puede aparecer varias veces (una por
+// semana en la que participó).
+export interface FieldTeamMemberItem extends BasicUser {
+  weekStartDate: string
+}
+
 export interface FieldTeamItem {
   id: string
   name: string
   vehicleLabel: string | null
-  members: BasicUser[]
+  members: FieldTeamMemberItem[]
+}
+
+export interface WeeklyAvailabilityItem {
+  id: string
+  user: BasicUser | null
+  weekStartDate: string
+  willAttend: boolean
+  reason: string | null
+  confirmedPresent: boolean | null
+}
+
+export interface MyAvailability {
+  id: string
+  weekStartDate: string
+  willAttend: boolean
+  reason: string | null
+  confirmedPresent: boolean | null
 }
 
 export interface ZoneAssignmentItem {
@@ -27,7 +52,13 @@ export interface ZoneItem {
   assignments: ZoneAssignmentItem[]
 }
 
-export type CheckinType = "en_camino" | "llegamos" | "entregando_viandas" | "relevando_caso"
+export type CheckinType =
+  | "en_camino"
+  | "llegamos"
+  | "presente_punto_encuentro"
+  | "presente_zona"
+  | "entregando_viandas"
+  | "relevando_caso"
 
 export interface CheckinItem {
   id: string
@@ -53,13 +84,36 @@ export const updateFieldTeam = (id: string, data: Partial<{ name: string; vehicl
 
 export const deleteFieldTeam = (id: string) => apiFetch(`/api/field-teams/${id}`, { method: "DELETE" })
 
-export const addFieldTeamMember = (teamId: string, userId: string) =>
-  apiFetch(`/api/field-teams/${teamId}/members`, { method: "POST", body: JSON.stringify({ userId }) }) as Promise<
-    BasicUser[]
+export const addFieldTeamMember = (teamId: string, userId: string, weekStartDate: string) =>
+  apiFetch(`/api/field-teams/${teamId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ userId, weekStartDate }),
+  }) as Promise<BasicUser[]>
+
+export const removeFieldTeamMember = (teamId: string, userId: string, weekStartDate: string) =>
+  apiFetch(`/api/field-teams/${teamId}/members/${userId}?weekStartDate=${encodeURIComponent(weekStartDate)}`, {
+    method: "DELETE",
+  })
+
+// ── Presentismo semanal (WeeklyAvailability) ──
+export const getMyAvailability = (weekStartDate: string) =>
+  apiFetch(`/api/weekly-availability/me?weekStartDate=${encodeURIComponent(weekStartDate)}`) as Promise<{
+    availability: MyAvailability | null
+  }>
+
+export const setMyAvailability = (data: { weekStartDate: string; willAttend: boolean; reason?: string }) =>
+  apiFetch("/api/weekly-availability/me", { method: "PUT", body: JSON.stringify(data) }) as Promise<MyAvailability>
+
+export const listWeeklyAvailability = (weekStartDate: string) =>
+  apiFetch(`/api/weekly-availability?weekStartDate=${encodeURIComponent(weekStartDate)}`) as Promise<
+    WeeklyAvailabilityItem[]
   >
 
-export const removeFieldTeamMember = (teamId: string, userId: string) =>
-  apiFetch(`/api/field-teams/${teamId}/members/${userId}`, { method: "DELETE" })
+export const confirmWeeklyAvailability = (id: string, confirmedPresent: boolean) =>
+  apiFetch(`/api/weekly-availability/${id}/confirm`, {
+    method: "PATCH",
+    body: JSON.stringify({ confirmedPresent }),
+  }) as Promise<WeeklyAvailabilityItem>
 
 // ── Zonas ──
 export const listZones = () => apiFetch("/api/zones") as Promise<ZoneItem[]>
