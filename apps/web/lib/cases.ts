@@ -27,6 +27,13 @@ export const NEED_CATEGORIES = [
   "otro",
 ] as const
 export const NEED_URGENCIES = ["inmediata", "urgente", "normal"] as const
+export const CASE_ASSIGNMENT_ROLES = [
+  "coordinador",
+  "visitador_social",
+  "psicologo",
+  "seguimiento_laboral",
+  "seguimiento_conducta",
+] as const
 
 export type CaseType = (typeof CASE_TYPES)[number]
 export type StayType = (typeof STAY_TYPES)[number]
@@ -35,6 +42,7 @@ export type CaseFeasibility = (typeof FEASIBILITIES)[number]
 export type CaseStatus = (typeof CASE_STATUSES)[number]
 export type NeedCategory = (typeof NEED_CATEGORIES)[number]
 export type NeedUrgency = (typeof NEED_URGENCIES)[number]
+export type CaseAssignmentRole = (typeof CASE_ASSIGNMENT_ROLES)[number]
 
 export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   individual: "Persona sola",
@@ -72,6 +80,13 @@ export const NEED_URGENCY_LABEL: Record<NeedUrgency, string> = {
   inmediata: "Inmediata",
   urgente: "Urgente",
   normal: "Normal",
+}
+export const CASE_ASSIGNMENT_ROLE_LABEL: Record<CaseAssignmentRole, string> = {
+  coordinador: "Coordinador/a",
+  visitador_social: "Visitador/a social",
+  psicologo: "Psicólogo/a",
+  seguimiento_laboral: "Seguimiento laboral",
+  seguimiento_conducta: "Seguimiento de conducta",
 }
 
 export interface BasicUser {
@@ -141,6 +156,15 @@ export interface CaseStatusHistoryItem {
   changedBy: BasicUser | null
 }
 
+export interface CaseAssignmentItem {
+  id: string
+  user: BasicUser | null
+  role: CaseAssignmentRole
+  roleLabel: string
+  assignedAt: string
+  unassignedAt: string | null
+}
+
 /**
  * Integrante adicional de un caso "pareja" / "grupo_familiar" — el
  * referente del grupo vive en los campos de CaseDetail de arriba, el
@@ -197,6 +221,7 @@ export interface CaseDetail {
   skills: CaseSkillItem[]
   needs: CaseNeedItem[]
   statusHistory: CaseStatusHistoryItem[]
+  assignments: CaseAssignmentItem[]
   members: CaseMemberItem[]
 }
 
@@ -341,3 +366,11 @@ export const addCaseMemberPhoto = (id: string, memberId: string, url: string) =>
 
 export const deleteCaseMemberPhoto = (id: string, memberId: string, photoId: string) =>
   apiFetch(`/api/cases/${id}/members/${memberId}/photos/${photoId}`, { method: "DELETE" })
+
+// ── Asignaciones de roles (bloque D) ──
+
+export const assignCaseUser = (id: string, data: { userId: string; role: CaseAssignmentRole }) =>
+  apiFetch(`/api/cases/${id}/assignments`, { method: "POST", body: JSON.stringify(data) }) as Promise<CaseDetail>
+
+export const unassignCaseUser = (id: string, assignmentId: string) =>
+  apiFetch(`/api/cases/${id}/assignments/${assignmentId}/unassign`, { method: "PATCH" }) as Promise<CaseDetail>

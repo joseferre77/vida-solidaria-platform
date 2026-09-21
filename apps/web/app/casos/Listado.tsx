@@ -9,6 +9,9 @@ import {
   addCaseMemberSkill,
   addCaseNeed,
   addCaseSkill,
+  assignCaseUser,
+  CASE_ASSIGNMENT_ROLE_LABEL,
+  CASE_ASSIGNMENT_ROLES,
   CASE_STATUS_LABEL,
   CASE_STATUSES,
   CASE_TYPE_LABEL,
@@ -28,10 +31,12 @@ import {
   resolveCaseMemberNeed,
   resolveCaseNeed,
   STAY_TYPE_LABEL,
+  unassignCaseUser,
   updateCase,
   uploadCaseFile,
   VIABILITY_LABEL,
   VIABILITIES,
+  type CaseAssignmentRole,
   type CaseDetail,
   type CaseListItem,
   type CaseMemberItem,
@@ -39,6 +44,7 @@ import {
   type NeedCategory,
   type NeedUrgency,
 } from "../../lib/cases"
+import { listBasicUsers, type BasicUser } from "../../lib/projects"
 
 const STATUS_COLOR: Record<CaseStatus, string> = {
   activo: "bg-yellow/20 text-yellow",
@@ -624,6 +630,13 @@ function CaseDetailModal({
           <MembersSection id={id} members={detail.members} canWrite={canWrite} onChanged={() => { load(); onChanged() }} />
         )}
 
+        <AssignmentsSection
+          id={id}
+          assignments={detail.assignments}
+          canWrite={canWrite}
+          onChanged={() => { load(); onChanged() }}
+        />
+
         <div className="mb-2">
           <h3 className="mb-2 text-sm font-semibold text-cream">Bitácora de contactos</h3>
           <div className="max-h-40 space-y-1.5 overflow-y-auto">
@@ -671,6 +684,117 @@ function CaseDetailModal({
           {detail.updatedBy && <> · última edición: {detail.updatedBy.name}</>}
         </p>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Fase K bloque D — quién lleva el caso. Al asignar/desasignar se avisa
+ * por notificación + email a esa persona (ver cases.routes.ts); acá solo
+ * se muestra el equipo activo y se arma/deshace la asignación. El
+ * historial (gente ya desasignada) no se muestra acá a propósito, para no
+ * saturar la ficha — queda en la base para el ranking del bloque G.
+ */
+function AssignmentsSection({
+  id,
+  assignments,
+  canWrite,
+  onChanged,
+}: {
+  id: string
+  assignments: CaseDetail["assignments"]
+  canWrite: boolean
+  onChanged: () => void
+}) {
+  const [allUsers, setAllUsers] = useState<BasicUser[] | null>(null)
+  const [pickUserId, setPickUserId] = useState("")
+  const [pickRole, setPickRole] = useState<CaseAssignmentRole>("coordinador")
+  const [error, setError] = useState<string | null>(null)
+
+  const active = assignments.filter((a) => !a.unassignedAt)
+
+  useEffect(() => {
+    if (canWrite && !allUsers) {
+      listBasicUsers()
+        .then(setAllUsers)
+        .catch((e) => setError(e.message))
+    }
+  }, [canWrite, allUsers])
+
+  return (
+    <div className="mb-4">
+      <h3 className="mb-2 text-sm font-semibold text-cream">Equipo asignado</h3>
+      {error && <p className="mb-2 text-xs text-orange">{error}</p>}
+      <div className="space-y-1.5">
+        {active.map((a) => (
+          <div key={a.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-xs">
+            <span className="text-cream">
+              {a.user?.name ?? "—"} <span className="text-cream/50">— {a.roleLabel}</span>
+            </span>
+            {canWrite && (
+              <button
+                onClick={async () => {
+                  try {
+                    await unassignCaseUser(id, a.id)
+                    onChanged()
+                  } catch (e: any) {
+                    setError(e.message)
+                  }
+                }}
+                className="text-orange hover:underline"
+              >
+                Desasignar
+              </button>
+            )}
+          </div>
+        ))}
+        {active.length === 0 && <p className="text-xs text-cream/40">Todavía nadie asignado a este caso.</p>}
+      </div>
+
+      {canWrite && allUsers && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <select
+            value={pickUserId}
+            onChange={(e) => setPickUserId(e.target.value)}
+            className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+          >
+            <option value="" className="bg-purple-deep">
+              Elegir persona...
+            </option>
+            {allUsers.map((u) => (
+              <option key={u.id} value={u.id} className="bg-purple-deep">
+                {u.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={pickRole}
+            onChange={(e) => setPickRole(e.target.value as CaseAssignmentRole)}
+            className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+          >
+            {CASE_ASSIGNMENT_ROLES.map((r) => (
+              <option key={r} value={r} className="bg-purple-deep">
+                {CASE_ASSIGNMENT_ROLE_LABEL[r]}
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={!pickUserId}
+            onClick={async () => {
+              try {
+                await assignCaseUser(id, { userId: pickUserId, role: pickRole })
+                setPickUserId("")
+                onChanged()
+              } catch (e: any) {
+                setError(e.message)
+              }
+            }}
+            className="rounded-lg bg-yellow px-3 text-xs font-semibold text-purple-deep disabled:opacity-50"
+          >
+            + Asignar
+          </button>
+        </div>
+      )}
     </div>
   )
 }

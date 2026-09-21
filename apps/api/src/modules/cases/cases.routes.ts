@@ -1,4 +1,13 @@
 /**
+ * Fase K bloque D — asignación de casos con roles + notificaciones por
+ * email: ver `CASE_ASSIGNMENT_ROLES` y las rutas `/cases/:id/assignments`
+ * más abajo, y los `notify(...)` agregados en contactos y cambio de
+ * estado. Decisión de diseño (quedaba como pregunta abierta en
+ * PLAN_FASE_K.md): "estado de cierre" = `CaseStatus.cerrado` (ya existía
+ * como valor del enum), NO `feasibility: no_factible` — son ejes
+ * distintos (factibilidad de extracción vs. si el caso sigue abierto), y
+ * `cerrado` es más directo para "se terminó el seguimiento de este caso".
+ *
  * Módulo: Casos sociales (permiso `cases.read` / `cases.write`).
  *
  * Fase J — reemplazo de la planilla en papel de relevamiento. El endpoint
@@ -30,6 +39,7 @@ import type { FastifyInstance } from "fastify"
 import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
+import { notify } from "../../lib/notify"
 
 const CASE_TYPES = ["individual", "pareja", "grupo_familiar"] as const
 const STAY_TYPES = ["calle", "parador_temporal"] as const
@@ -38,6 +48,26 @@ const FEASIBILITIES = ["factible", "no_factible", "en_pausa"] as const
 const CASE_STATUSES = ["activo", "en_seguimiento", "derivado", "cerrado"] as const
 const NEED_CATEGORIES = ["salud", "documentacion", "abrigo", "alimentacion", "vivienda", "laboral", "otro"] as const
 const NEED_URGENCIES = ["inmediata", "urgente", "normal"] as const
+const CASE_ASSIGNMENT_ROLES = [
+  "coordinador",
+  "visitador_social",
+  "psicologo",
+  "seguimiento_laboral",
+  "seguimiento_conducta",
+] as const
+
+const CASE_ASSIGNMENT_ROLE_LABEL: Record<(typeof CASE_ASSIGNMENT_ROLES)[number], string> = {
+  coordinador: "Coordinador/a",
+  visitador_social: "Visitador/a social",
+  psicologo: "Psicólogo/a",
+  seguimiento_laboral: "Seguimiento laboral",
+  seguimiento_conducta: "Seguimiento de conducta",
+}
+
+const assignmentSchema = z.object({
+  userId: z.string().uuid(),
+  role: z.enum(CASE_ASSIGNMENT_ROLES),
+})
 
 const needInputSchema = z.object({
   category: z.enum(NEED_CATEGORIES),
@@ -150,6 +180,18 @@ async function userMapFor(ids: (string | null | undefined)[]) {
   return new Map(users.map((u) => [u.id, u]))
 }
 
+/** userIds únicos con asignación ACTIVA (unassignedAt null) a un caso,
+ * opcionalmente sin contar a `excludeUserId` (ej. quien acaba de cargar la
+ * evolución no necesita que se le notifique a sí mismo). */
+async function activeAssigneeIds(caseId: string, excludeUserId?: string) {
+  const assignments = await prisma.caseAssignment.findMany({
+    where: { caseId, unassignedAt: null },
+    select: { userId: true },
+  })
+  const ids = Array.from(new Set(assignments.map((a) => a.userId)))
+  return excludeUserId ? ids.filter((id) => id !== excludeUserId) : ids
+}
+
 async function nextCaseNumber() {
   const counter = await prisma.counter.upsert({
     where: { name: "case_number" },
@@ -168,6 +210,7 @@ const CASE_DETAIL_INCLUDE = {
   skills: true,
   needs: { orderBy: { createdAt: "desc" as const } },
   statusHistory: { orderBy: { changedAt: "desc" as const } },
+  assignments: { orderBy: { assignedAt: "desc" as const } },
   members: {
     orderBy: { createdAt: "asc" as const },
     include: {
@@ -205,6 +248,7 @@ async function serializeCaseDetail(c: any) {
     ...c.locations.map((x: any) => x.recordedBy),
     ...c.photos.map((x: any) => x.uploadedBy),
     ...c.statusHistory.map((x: any) => x.changedBy),
+    ...c.assignments.map((x: any) => x.userId),
     ...c.members.flatMap((m: any) => m.photos.map((p: any) => p.uploadedBy)),
   ])
   return {
@@ -255,6 +299,14 @@ async function serializeCaseDetail(c: any) {
       fromStatus: x.fromStatus,
       changedAt: x.changedAt,
       changedBy: users.get(x.changedBy) ?? null,
+    })),
+    assignments: c.assignments.map((x: any) => ({
+      id: x.id,
+      user: users.get(x.userId) ?? null,
+      role: x.role,
+      roleLabel: CASE_ASSIGNMENT_ROLE_LABEL[x.role as (typeof CASE_ASSIGNMENT_ROLES)[number]],
+      assignedAt: x.assignedAt,
+      unassignedAt: x.unassignedAt,
     })),
     members: c.members.map((m: any) => ({
       id: m.id,
@@ -405,6 +457,25 @@ export async function casesRoutes(app: FastifyInstance) {
         },
         include: CASE_DETAIL_INCLUDE,
       })
+
+      // "Estado de cierre" = CaseStatus.cerrado (ver nota de diseño arriba
+      // del archivo) — se avisa al equipo asignado con el motivo, si el
+      // caso no estaba ya cerrado antes (evita reenviar el mismo aviso si
+      // se vuelve a guardar el mismo estado).
+      if (body.status === "cerrado" && current.status !== "cerrado") {
+        const notifyIds = await activeAssigneeIds(id)
+        await notify(notifyIds, {
+          title: `Caso cerrado: ${updated.caseNumber}`,
+          body: body.closeReason || "Sin motivo especificado.",
+          link: "/casos",
+          type: "case_closed",
+          email: {
+            subject: `Vida Solidaria — se cerró el caso ${updated.caseNumber} (${updated.fullName})`,
+            html: `<p>Se cerró el caso <strong>${updated.caseNumber} — ${updated.fullName}</strong>.</p><p><strong>Motivo:</strong> ${body.closeReason || "Sin motivo especificado."}</p>`,
+          },
+        })
+      }
+
       return serializeCaseDetail(updated)
     },
   )
@@ -415,7 +486,27 @@ export async function casesRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = contactSchema.parse(request.body)
-      await prisma.caseContactHistory.create({ data: { caseId: id, userId: request.user!.sub, ...body } })
+      const author = request.user!.sub
+      const [, caseRecord] = await Promise.all([
+        prisma.caseContactHistory.create({ data: { caseId: id, userId: author, ...body } }),
+        prisma.case.findUniqueOrThrow({ where: { id } }),
+      ])
+
+      // Aviso a todo el equipo asignado (menos a quien la cargó) de que hay
+      // una entrada nueva en la bitácora — así no dependen de entrar a
+      // revisar el caso para enterarse de una evolución.
+      const notifyIds = await activeAssigneeIds(id, author)
+      await notify(notifyIds, {
+        title: `Nueva evolución en el caso ${caseRecord.caseNumber}`,
+        body: body.notes.length > 140 ? `${body.notes.slice(0, 140)}…` : body.notes,
+        link: "/casos",
+        type: "case_contact",
+        email: {
+          subject: `Vida Solidaria — nueva evolución en el caso ${caseRecord.caseNumber} (${caseRecord.fullName})`,
+          html: `<p>Se cargó una nueva entrada en la bitácora del caso <strong>${caseRecord.caseNumber} — ${caseRecord.fullName}</strong>:</p><p>${body.notes}</p>`,
+        },
+      })
+
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return reply.code(201).send(await serializeCaseDetail(updated))
     },
@@ -608,6 +699,64 @@ export async function casesRoutes(app: FastifyInstance) {
     async (request) => {
       const { id, photoId } = request.params as { id: string; memberId: string; photoId: string }
       await prisma.casePhoto.delete({ where: { id: photoId } })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return serializeCaseDetail(updated)
+    },
+  )
+
+  // ── Asignaciones de roles (bloque D) ──
+
+  app.post(
+    "/cases/:id/assignments",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const body = assignmentSchema.parse(request.body)
+      const caseRecord = await prisma.case.findUniqueOrThrow({ where: { id } })
+      await prisma.caseAssignment.create({ data: { caseId: id, userId: body.userId, role: body.role } })
+
+      await notify([body.userId], {
+        title: `Te asignaron al caso ${caseRecord.caseNumber} como ${CASE_ASSIGNMENT_ROLE_LABEL[body.role]}`,
+        body: caseRecord.fullName,
+        link: "/casos",
+        type: "case_assignment",
+        email: {
+          subject: `Vida Solidaria — te asignaron al caso ${caseRecord.caseNumber}`,
+          html: `<p>Te asignaron como <strong>${CASE_ASSIGNMENT_ROLE_LABEL[body.role]}</strong> al caso <strong>${caseRecord.caseNumber} — ${caseRecord.fullName}</strong>.</p>`,
+        },
+      })
+
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return reply.code(201).send(await serializeCaseDetail(updated))
+    },
+  )
+
+  app.patch(
+    "/cases/:id/assignments/:assignmentId/unassign",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request, reply) => {
+      const { id, assignmentId } = request.params as { id: string; assignmentId: string }
+      const assignment = await prisma.caseAssignment.findUnique({ where: { id: assignmentId } })
+      if (!assignment || assignment.caseId !== id) {
+        return reply.code(404).send({ error: "Asignación no encontrada" })
+      }
+      if (assignment.unassignedAt) {
+        return reply.code(400).send({ error: "Esta asignación ya estaba desasignada" })
+      }
+      const caseRecord = await prisma.case.findUniqueOrThrow({ where: { id } })
+      await prisma.caseAssignment.update({ where: { id: assignmentId }, data: { unassignedAt: new Date() } })
+
+      await notify([assignment.userId], {
+        title: `Te desasignaron del caso ${caseRecord.caseNumber}`,
+        body: caseRecord.fullName,
+        link: "/casos",
+        type: "case_unassignment",
+        email: {
+          subject: `Vida Solidaria — te desasignaron del caso ${caseRecord.caseNumber}`,
+          html: `<p>Te desasignaron como <strong>${CASE_ASSIGNMENT_ROLE_LABEL[assignment.role]}</strong> del caso <strong>${caseRecord.caseNumber} — ${caseRecord.fullName}</strong>.</p>`,
+        },
+      })
+
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },

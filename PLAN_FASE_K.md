@@ -1,10 +1,11 @@
 # PLAN — Fase K: Voluntariado, Presentismo, Cocina, Casos, Stock y Analítica
 
-> Estado: **F + C + A + B entregados y en producción (21/09/2026)**. Este
+> Estado: **F + C + A + B + D entregados y en producción (21/09/2026)**. Este
 > documento traduce el pedido de Josecito (21/09/2026) a diseño técnico
 > concreto, contrastado contra el schema y las rutas YA existentes (no se
-> repite trabajo hecho). Sigue en **D) Circuito de Casos** y **E) Relevamiento**
-> (en paralelo). Actualizar el estado de cada bloque a medida que se entrega.
+> repite trabajo hecho). Sigue en **E) Relevamiento** (KPI de carga +
+> buscador anti-duplicados). Actualizar el estado de cada bloque a medida
+> que se entrega.
 >
 > ⚠️ **Pendiente de vos, para el final de Fase K** (así lo pediste — "dejamos
 > para el final de las implementaciones resend y el watchdog"): 1) crear la
@@ -144,27 +145,43 @@ indicador semanal sale de sumar `FieldDelivery` por domingo (bloque G).
 
 ---
 
-## D) Circuito de Casos — asignación con roles + notificaciones (EXTIENDE Fase J)
+## D) Circuito de Casos — asignación con roles + notificaciones (EXTIENDE Fase J) ✅ ENTREGADO (21/09/2026)
 
-**Ya existe**: `Case` (individual/pareja/grupo_familiar), `CaseMember`,
+**Ya existía**: `Case` (individual/pareja/grupo_familiar), `CaseMember`,
 `CaseContactHistory`, `CaseStatusHistory`, `CaseViability` (alta/media/baja
 — esto YA es tu "probabilidad de extracción"), `CaseFeasibility`
 (factible/no_factible/en_pausa — esto YA es tu "caso que se cierra por no
 ser posible seguir").
 
-**Falta (nuevo)**: no hay ningún vínculo entre un `Case` y los usuarios que
-lo llevan. Se agrega `CaseAssignment` (caseId, userId, `role` — enum
-`coordinador | visitador_social | psicologo | seguimiento_laboral |
-seguimiento_conducta`, `assignedAt`, `unassignedAt` opcional). Un caso puede
-tener varios usuarios con distintos roles a la vez.
+**Construido**: se agregó `CaseAssignment` (caseId, `userId` suelto igual
+que el resto del módulo, `role` — enum `coordinador | visitador_social |
+psicologo | seguimiento_laboral | seguimiento_conducta`, `assignedAt`,
+`unassignedAt` opcional). Un caso puede tener varios usuarios con distintos
+roles a la vez, e incluso la misma persona con dos roles. Desasignar marca
+`unassignedAt` en vez de borrar, así el historial de quién pasó por el caso
+queda para el ranking del bloque G. Se ve y se gestiona desde una sección
+nueva "Equipo asignado" en la ficha de cada caso (`/casos`).
 
-**Notificaciones por email (nuevas, sobre el mismo Resend del bloque A)**:
-- Al asignar/desasignar un usuario a un caso → email a ese usuario.
-- Al agregar una entrada en `CaseContactHistory` (evolución) → email a todos
-  los asignados al caso (menos a quien la cargó).
-- Al cambiar `CaseStatusHistory` a un estado de cierre (`feasibility:
-  no_factible` o el estado que definan como "cerrado") → email a los
-  asignados con el motivo (`closeReason`, campo que ya existe).
+**Decisión de diseño resuelta** (era la pregunta abierta de este documento):
+"estado de cierre" a efectos del email = `CaseStatus.cerrado` (el valor de
+estado que ya existía), no `feasibility: no_factible` — son ejes distintos
+(factibilidad de extracción vs. si el caso sigue con seguimiento abierto o
+no), y `cerrado` es la señal más directa de "esto se terminó".
+
+**Notificaciones (in-app + email, mismo `lib/notify.ts` de los bloques
+anteriores — sin `RESEND_API_KEY` funciona igual, solo no manda el mail
+real todavía)**:
+- Al asignar/desasignar un usuario a un caso → aviso a ese usuario.
+- Al agregar una entrada en `CaseContactHistory` (evolución) → aviso a
+  todos los asignados ACTIVOS al caso (menos a quien la cargó).
+- Al cambiar el estado a `cerrado` (y no lo estaba ya) → aviso a los
+  asignados activos con el motivo (`closeReason`).
+
+**Verificación antes de tocar producción**: migración probada contra
+Postgres local (diff limpio ida y vuelta) + script funcional (asignar dos
+roles a dos personas, un mismo usuario con dos roles a la vez, desasignar
+sin borrar, historial completo se conserva, cascade delete del caso borra
+sus asignaciones) — los cinco casos pasaron antes de aplicar en producción.
 
 ---
 
@@ -268,10 +285,11 @@ sola ruta construida. Se arma `GET /api/analytics/*` (permiso ya existe:
   por alta rotación de voluntarios/coordinadores — se arman de nuevo cada
   domingo según convocatoria confirmada, no equipos fijos).
 
-## Preguntas abiertas (antes de tocar código de D)
+## Preguntas abiertas
 
-1. ¿Qué cuenta como "caso cerrado" a efectos del email de cierre — un campo
-   de estado específico, o alcanza con `feasibility = no_factible`?
+Ninguna pendiente por ahora. La única que quedaba (qué cuenta como "caso
+cerrado" a efectos del email) se resolvió al construir D: `CaseStatus.cerrado`
+— ver esa sección arriba.
 
 ## Orden de construcción
 
@@ -283,9 +301,9 @@ sola ruta construida. Se arma `GET /api/analytics/*` (permiso ya existe:
    ella, simplemente no manda los mails hasta que se cargue).
 3. ~~**B (presentismo + equipos semanales)**~~ — **entregado y en
    producción el 21/09/2026.**
-4. **D (asignación de casos con roles + notificaciones)** y **E (KPI de
-   relevamiento + buscador)** — siguiente, en paralelo, son independientes
-   entre sí.
-5. **G (analítica)** — al final, porque consume datos de todos los
+4. ~~**D (asignación de casos con roles + notificaciones)**~~ — **entregado
+   y en producción el 21/09/2026.**
+5. **E (KPI de relevamiento + buscador)** — siguiente.
+6. **G (analítica)** — al final, porque consume datos de todos los
    anteriores (mientras más bloques estén cargando datos reales, más útil
    sale el tablero).
