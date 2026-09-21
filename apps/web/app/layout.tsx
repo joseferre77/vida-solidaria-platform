@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import "../styles/globals.css"
+import { AppShell } from "../components/AppShell"
 
 export const metadata: Metadata = {
   title: "Vida Solidaria — Plataforma de Gestión",
@@ -23,7 +24,9 @@ export const dynamic = "force-dynamic"
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
-      <body className="font-body min-h-screen">{children}</body>
+      <body className="font-body min-h-screen">
+        <AppShell>{children}</AppShell>
+      </body>
     </html>
   )
 }

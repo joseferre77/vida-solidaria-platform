@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
 import { fetchMe, hasPermission, type SessionUser } from "../../lib/auth"
 import { Equipos } from "./tabs/Equipos"
 import { Zonas } from "./tabs/Zonas"
@@ -41,9 +40,6 @@ export default function EquiposPage() {
     return (
       <main className="min-h-screen px-4 py-10 sm:px-6">
         <p className="text-sm text-cream/60">No tenés permiso para ver esta sección.</p>
-        <Link href="/dashboard" className="mt-2 inline-block text-xs text-yellow hover:underline">
-          ← Volver al inicio
-        </Link>
       </main>
     )
   }
@@ -60,10 +56,7 @@ export default function EquiposPage() {
   return (
     <main className="min-h-screen px-4 py-10 sm:px-6">
       <header className="mb-6">
-        <Link href="/dashboard" className="text-xs text-cream/50 hover:underline">
-          ← Inicio
-        </Link>
-        <h1 className="mt-1 font-display text-2xl font-bold text-yellow">Equipos y Secciones</h1>
+        <h1 className="font-display text-2xl font-bold text-yellow">Equipos y Secciones</h1>
         <p className="mt-1 text-xs text-cream/50">
           Equipos de campo, zonas, check-ins de Extracción y Relevamiento, y lotes de Cocina.
         </p>

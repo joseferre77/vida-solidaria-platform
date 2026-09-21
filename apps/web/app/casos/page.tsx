@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
 import { fetchMe, hasPermission, type SessionUser } from "../../lib/auth"
 import { NuevoCaso } from "./NuevoCaso"
 import { Listado } from "./Listado"
@@ -40,9 +39,6 @@ export default function CasosPage() {
     return (
       <main className="min-h-screen px-4 py-10 sm:px-6">
         <p className="text-sm text-cream/60">No tenés permiso para ver esta sección.</p>
-        <Link href="/dashboard" className="mt-2 inline-block text-xs text-yellow hover:underline">
-          ← Volver al inicio
-        </Link>
       </main>
     )
   }
@@ -57,10 +53,7 @@ export default function CasosPage() {
   return (
     <main className="min-h-screen px-4 py-10 sm:px-6">
       <header className="mb-6">
-        <Link href="/dashboard" className="text-xs text-cream/50 hover:underline">
-          ← Inicio
-        </Link>
-        <h1 className="mt-1 font-display text-2xl font-bold text-yellow">Casos</h1>
+        <h1 className="font-display text-2xl font-bold text-yellow">Casos</h1>
         <p className="mt-1 text-xs text-cream/50">
           Relevamiento en la calle y seguimiento de casos sociales — reemplaza la planilla en papel.
         </p>

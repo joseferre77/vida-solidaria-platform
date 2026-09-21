@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { fetchMe, hasPermission, type SessionUser } from "../../lib/auth"
 import {
@@ -92,9 +91,6 @@ export default function ProyectosPage() {
     <main className="min-h-screen px-4 py-10 sm:px-6">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link href="/dashboard" className="text-xs text-cream/50 hover:underline">
-            ← Volver al dashboard
-          </Link>
           <h1 className="font-display text-2xl font-bold text-yellow">Proyectos</h1>
           <p className="text-sm text-cream/50">
             {projects ? `${projects.length} proyecto${projects.length === 1 ? "" : "s"}` : ""}
