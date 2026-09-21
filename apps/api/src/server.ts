@@ -27,16 +27,31 @@ async function main() {
     trustProxy: true,
   })
 
-  // CORS_ORIGIN admite una lista separada por comas — desde Fase K bloque A
-  // el sitio estático vidasolidariamdp.com (dominio raíz) también postea acá
-  // (alta pública de voluntarios), además de gestion.vidasolidariamdp.com.
+  // CORS_ORIGIN admite una lista separada por comas (por si hace falta sumar
+  // un origen que no sea *.vidasolidariamdp.com). OJO: en Hostinger el env
+  // var configurado desde hPanel (Node.js App → Environment variables) pisa
+  // lo que tenga el .env del repo — dotenv no sobreescribe una variable que
+  // el proceso ya trae seteada. Por eso este chequeo NO depende solo del
+  // env var: cualquier subdominio (o el dominio raíz) de vidasolidariamdp.com
+  // queda permitido siempre, aunque a alguien se le olvide actualizar el env
+  // var en el panel — es la única fuente de la verdad para "es nuestro sitio".
+  const VIDASOLIDARIA_APEX = "vidasolidariamdp.com"
   const allowedOrigins = env.CORS_ORIGIN.split(",")
     .map((o) => o.trim())
     .filter(Boolean)
+  function isAllowedOrigin(origin: string): boolean {
+    if (allowedOrigins.includes(origin)) return true
+    try {
+      const host = new URL(origin).hostname
+      return host === VIDASOLIDARIA_APEX || host.endsWith(`.${VIDASOLIDARIA_APEX}`)
+    } catch {
+      return false
+    }
+  }
   await app.register(cors, {
     origin: (origin, callback) => {
-      // Sin header Origin (ej. curl, apps nativas) o origen en la lista: ok.
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true)
+      // Sin header Origin (ej. curl, apps nativas) o origen permitido: ok.
+      if (!origin || isAllowedOrigin(origin)) return callback(null, true)
       callback(new Error("Origen no permitido por CORS"), false)
     },
     credentials: true,
