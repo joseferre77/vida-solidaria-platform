@@ -18,6 +18,7 @@ import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
 import { hashPassword } from "../auth/auth.service"
 import { GLOBAL_ROLES } from "../rbac/permissions"
+import { sendEmail } from "../../lib/email"
 
 const PASSWORD_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#%*"
 
@@ -46,6 +47,10 @@ const updateRolesSchema = z.object({
   roleSlugs: z.array(roleSlugSchema).min(1, "Un usuario necesita al menos un rol"),
 })
 
+const approveUserSchema = z.object({
+  roleSlugs: z.array(roleSlugSchema).min(1, "Elegí al menos un rol"),
+})
+
 function serializeUser(user: {
   id: string
   name: string
@@ -53,6 +58,7 @@ function serializeUser(user: {
   phone: string | null
   avatarUrl: string | null
   status: string
+  volunteerMessage: string | null
   createdAt: Date
   roles: { role: { slug: string; label: string; rank: number } }[]
 }) {
@@ -63,12 +69,26 @@ function serializeUser(user: {
     phone: user.phone,
     avatarUrl: user.avatarUrl,
     status: user.status,
+    volunteerMessage: user.volunteerMessage,
     createdAt: user.createdAt,
     roles: user.roles
       .map((ur) => ur.role)
       .sort((a, b) => a.rank - b.rank)
       .map((r) => ({ slug: r.slug, label: r.label })),
   }
+}
+
+function welcomeApprovedEmailHtml(name: string, roleLabels: string[]) {
+  return `
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2 style="color:#73038C;">¡Bienvenido/a al equipo, ${name}!</h2>
+      <p>La comisión de <strong>Vida Solidaria Mar del Plata</strong> aprobó tu alta como voluntario/a.</p>
+      <p>Tu rol: <strong>${roleLabels.join(", ")}</strong>.</p>
+      <p>Ya podés entrar al sistema de gestión con tu email y la contraseña que te compartió quien te dio el alta.
+      La vas a poder cambiar después desde tu perfil.</p>
+      <p>¡Gracias por sumarte!</p>
+    </div>
+  `
 }
 
 const USER_WITH_ROLES_INCLUDE = { roles: { include: { role: true } } } as const
@@ -182,6 +202,82 @@ export async function usersRoutes(app: FastifyInstance) {
 
       const updated = await prisma.user.findUniqueOrThrow({ where: { id }, include: USER_WITH_ROLES_INCLUDE })
       return serializeUser(updated)
+    },
+  )
+
+  // ── Aprobar alta de voluntario (viene de vidasolidariamdp.com, status
+  // "pending") — elige rol(es), pasa a "active" y dispara el email real de
+  // bienvenida. Mismo patrón de contraseña generada que el alta manual. ──
+  app.patch(
+    "/users/:id/approve",
+    { preHandler: [requireAuth, requirePermission("users.manage")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const body = approveUserSchema.parse(request.body)
+
+      const target = await prisma.user.findUnique({ where: { id } })
+      if (!target) return reply.code(404).send({ error: "Usuario no encontrado" })
+      if (target.status !== "pending") {
+        return reply.code(400).send({ error: "Este usuario no está pendiente de aprobación" })
+      }
+
+      const roles = await prisma.role.findMany({ where: { slug: { in: body.roleSlugs } } })
+      if (roles.length !== body.roleSlugs.length) {
+        return reply.code(400).send({ error: "Alguno de los roles enviados no existe" })
+      }
+
+      const generatedPassword = generateSecurePassword()
+      const passwordHash = await hashPassword(generatedPassword)
+
+      const user = await prisma.user.update({
+        where: { id },
+        data: {
+          status: "active",
+          passwordHash,
+          roles: { create: roles.map((r) => ({ roleId: r.id })) },
+        },
+        include: USER_WITH_ROLES_INCLUDE,
+      })
+
+      await sendEmail({
+        to: user.email,
+        subject: "¡Ya sos parte de Vida Solidaria MDP!",
+        html: welcomeApprovedEmailHtml(
+          user.name,
+          roles.sort((a, b) => a.rank - b.rank).map((r) => r.label),
+        ),
+      })
+
+      return reply.send({
+        user: serializeUser(user),
+        // Igual que en el alta manual: se devuelve una única vez para que
+        // quien aprobó se la pueda compartir si el email todavía no llega
+        // (ej. Resend sin configurar) — no queda guardada en ningún lado.
+        generatedPassword,
+      })
+    },
+  )
+
+  // ── Rechazar alta de voluntario — pasa a "rejected", sin mail (para no
+  // generar fricción; se puede agregar más adelante si hace falta). ──
+  app.patch(
+    "/users/:id/reject",
+    { preHandler: [requireAuth, requirePermission("users.manage")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+
+      const target = await prisma.user.findUnique({ where: { id } })
+      if (!target) return reply.code(404).send({ error: "Usuario no encontrado" })
+      if (target.status !== "pending") {
+        return reply.code(400).send({ error: "Este usuario no está pendiente de aprobación" })
+      }
+
+      const user = await prisma.user.update({
+        where: { id },
+        data: { status: "rejected" },
+        include: USER_WITH_ROLES_INCLUDE,
+      })
+      return serializeUser(user)
     },
   )
 }

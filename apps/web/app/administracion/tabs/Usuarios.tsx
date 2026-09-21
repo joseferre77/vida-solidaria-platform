@@ -2,16 +2,23 @@
 
 import { useEffect, useState } from "react"
 import {
+  approveUser,
   createUser,
   listRoles,
   listUsers,
+  rejectUser,
   updateUser,
   updateUserRoles,
   type RoleItem,
   type UserItem,
 } from "../../../lib/users"
 
-const STATUS_LABEL: Record<string, string> = { active: "Activo", suspended: "Suspendido" }
+const STATUS_LABEL: Record<string, string> = {
+  active: "Activo",
+  suspended: "Suspendido",
+  pending: "Pendiente",
+  rejected: "Rechazado",
+}
 
 /**
  * Fase H — panel de administración de personas. Hasta ahora la única forma
@@ -45,11 +52,40 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
 
   if (!users || !roles) return <p className="text-cream/50">Cargando...</p>
 
+  const pendingUsers = users.filter((u) => u.status === "pending")
+  const tableUsers = users.filter((u) => u.status !== "pending")
+
   return (
     <div className="max-w-4xl">
+      {pendingUsers.length > 0 && (
+        <div className="mb-6">
+          <h3 className="mb-2 font-display text-sm font-bold uppercase tracking-wide text-yellow">
+            Pendientes de aprobación ({pendingUsers.length})
+          </h3>
+          <p className="mb-3 text-xs text-cream/50">
+            Se registraron solos desde vidasolidariamdp.com. Elegí su rol para darles el alta, o rechazalos.
+          </p>
+          <div className="space-y-3">
+            {pendingUsers.map((u) => (
+              <PendingApprovalCard
+                key={u.id}
+                user={u}
+                roles={roles}
+                onApproved={(user, generatedPassword) => {
+                  setLastGeneratedPassword({ email: user.email, password: generatedPassword })
+                  refresh()
+                }}
+                onRejected={refresh}
+                onError={setError}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs text-cream/50">
-          {users.length} {users.length === 1 ? "persona registrada" : "personas registradas"}
+          {tableUsers.length} {tableUsers.length === 1 ? "persona registrada" : "personas registradas"}
         </p>
         <button
           onClick={() => setShowForm(true)}
@@ -100,7 +136,7 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {tableUsers.map((u) => (
               <tr key={u.id} className="border-b border-white/5">
                 <td className="px-4 py-3 text-cream">
                   {u.name}
@@ -120,22 +156,28 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <button
-                    onClick={() => {
-                      if (u.id === currentUserId && u.status === "active") {
-                        setError("No podés suspender tu propio usuario")
-                        return
-                      }
-                      updateUser(u.id, { status: u.status === "active" ? "suspended" : "active" })
-                        .then(refresh)
-                        .catch((e) => setError(e.message))
-                    }}
-                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                      u.status === "active" ? "bg-green-500/20 text-green-300" : "bg-orange/20 text-orange"
-                    }`}
-                  >
-                    {STATUS_LABEL[u.status]}
-                  </button>
+                  {u.status === "rejected" ? (
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-cream/50">
+                      {STATUS_LABEL[u.status]}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (u.id === currentUserId && u.status === "active") {
+                          setError("No podés suspender tu propio usuario")
+                          return
+                        }
+                        updateUser(u.id, { status: u.status === "active" ? "suspended" : "active" })
+                          .then(refresh)
+                          .catch((e) => setError(e.message))
+                      }}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                        u.status === "active" ? "bg-green-500/20 text-green-300" : "bg-orange/20 text-orange"
+                      }`}
+                    >
+                      {STATUS_LABEL[u.status]}
+                    </button>
+                  )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">
                   <button onClick={() => setEditingRolesFor(u)} className="text-xs text-yellow hover:underline">
@@ -144,7 +186,7 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
                 </td>
               </tr>
             ))}
-            {users.length === 0 && (
+            {tableUsers.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-cream/50">
                   Todavía no hay usuarios registrados.
@@ -200,6 +242,120 @@ function RoleCheckboxList({
           {r.label}
         </label>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Fase K bloque A — una tarjeta por voluntario que se registró solo desde
+ * vidasolidariamdp.com y espera que la comisión lo apruebe o rechace. El
+ * rol es obligatorio para aprobar (reusa el mismo checklist que el alta
+ * manual), así que "Aprobar" queda deshabilitado hasta elegir al menos uno.
+ */
+function PendingApprovalCard({
+  user,
+  roles,
+  onApproved,
+  onRejected,
+  onError,
+}: {
+  user: UserItem
+  roles: RoleItem[]
+  onApproved: (user: UserItem, generatedPassword: string) => void
+  onRejected: () => void
+  onError: (e: string) => void
+}) {
+  const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
+  const [confirmingReject, setConfirmingReject] = useState(false)
+
+  function toggleRole(slug: string) {
+    setSelectedRoles((prev) => {
+      const next = new Set(prev)
+      if (next.has(slug)) next.delete(slug)
+      else next.add(slug)
+      return next
+    })
+  }
+
+  return (
+    <div className="rounded-2xl border border-yellow/30 bg-yellow/5 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-cream">{user.name}</p>
+          <p className="text-xs text-cream/60">{user.email}</p>
+          {user.phone && <p className="text-xs text-cream/60">{user.phone}</p>}
+        </div>
+        <p className="text-[11px] text-cream/40">
+          Se registró el {new Date(user.createdAt).toLocaleDateString("es-AR")}
+        </p>
+      </div>
+
+      {user.volunteerMessage && (
+        <p className="mt-2 rounded-lg bg-black/20 p-2.5 text-sm text-cream/80">"{user.volunteerMessage}"</p>
+      )}
+
+      <div className="mt-3">
+        <span className="mb-1 block text-xs text-cream/60">Rol para aprobar *</span>
+        <RoleCheckboxList roles={roles} selected={selectedRoles} onToggle={toggleRole} />
+      </div>
+
+      <div className="mt-3 flex items-center justify-end gap-3">
+        {confirmingReject ? (
+          <>
+            <span className="text-xs text-cream/60">¿Seguro que querés rechazarlo?</span>
+            <button
+              onClick={() => setConfirmingReject(false)}
+              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs hover:bg-white/5"
+            >
+              Cancelar
+            </button>
+            <button
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true)
+                try {
+                  await rejectUser(user.id)
+                  onRejected()
+                } catch (err: any) {
+                  onError(err.message ?? "No se pudo rechazar")
+                } finally {
+                  setSaving(false)
+                }
+              }}
+              className="rounded-xl bg-orange/80 px-3 py-1.5 text-xs font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+            >
+              Sí, rechazar
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setConfirmingReject(true)}
+              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs hover:bg-white/5"
+            >
+              Rechazar
+            </button>
+            <button
+              disabled={saving || selectedRoles.size === 0}
+              onClick={async () => {
+                setSaving(true)
+                try {
+                  const { user: approved, generatedPassword } = await approveUser(user.id, Array.from(selectedRoles))
+                  onApproved(approved, generatedPassword)
+                } catch (err: any) {
+                  onError(err.message ?? "No se pudo aprobar")
+                } finally {
+                  setSaving(false)
+                }
+              }}
+              className="rounded-xl bg-yellow px-4 py-1.5 text-xs font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? "Aprobando..." : "Aprobar"}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   )
 }

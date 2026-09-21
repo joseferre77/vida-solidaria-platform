@@ -16,14 +16,29 @@ import { fieldOpsRoutes } from "./modules/field-ops/field-ops.routes"
 import { logisticsRoutes } from "./modules/logistics/logistics.routes"
 import { casesRoutes } from "./modules/cases/cases.routes"
 import { notificationsRoutes } from "./modules/notifications/notifications.routes"
+import { publicRoutes } from "./modules/public/public.routes"
 
 async function main() {
   const app = Fastify({
     logger: isProd ? true : { transport: { target: "pino-pretty" } },
+    // Hostinger sirve la app Node detrás de un proxy propio — sin esto,
+    // request.ip siempre sería el del proxy (127.0.0.1), inutilizando el
+    // rate-limit por IP del alta pública de voluntarios (public.routes.ts).
+    trustProxy: true,
   })
 
+  // CORS_ORIGIN admite una lista separada por comas — desde Fase K bloque A
+  // el sitio estático vidasolidariamdp.com (dominio raíz) también postea acá
+  // (alta pública de voluntarios), además de gestion.vidasolidariamdp.com.
+  const allowedOrigins = env.CORS_ORIGIN.split(",")
+    .map((o) => o.trim())
+    .filter(Boolean)
   await app.register(cors, {
-    origin: env.CORS_ORIGIN,
+    origin: (origin, callback) => {
+      // Sin header Origin (ej. curl, apps nativas) o origen en la lista: ok.
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true)
+      callback(new Error("Origen no permitido por CORS"), false)
+    },
     credentials: true,
   })
   await app.register(cookie)
@@ -85,6 +100,7 @@ async function main() {
   await app.register(logisticsRoutes, { prefix: "/api" })
   await app.register(casesRoutes, { prefix: "/api" })
   await app.register(notificationsRoutes, { prefix: "/api" })
+  await app.register(publicRoutes, { prefix: "/api" })
 
   // TODO (Módulo 4+): registrar acá finance.routes (donaciones/compras/rendición).
   // logistics/field-ops/cases todavía sin Socket.IO (ver notas en esos módulos).

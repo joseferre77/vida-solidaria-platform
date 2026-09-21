@@ -22,6 +22,12 @@ datasource db {
 
 enum UserStatus {
   active
+  // Fase K bloque A: alta pública de voluntarios desde vidasolidariamdp.com.
+  // `pending` = se registró solo, espera aprobación de la comisión.
+  // `rejected` = la comisión decidió no darlo de alta (no se reactiva desde
+  // acá — si más adelante hace falta reconsiderar, se agrega a mano).
+  pending
+  rejected
   suspended
 }
 
@@ -34,6 +40,9 @@ model User {
   phone        String?
   avatarUrl    String?    @map("avatar_url")
   status       UserStatus @default(active)
+  // Motivo/mensaje que la persona escribió en el formulario público de alta
+  // (vidasolidariamdp.com). Null para usuarios creados a mano desde gestión.
+  volunteerMessage String? @map("volunteer_message")
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
