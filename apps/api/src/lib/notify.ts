@@ -8,12 +8,30 @@
 import { prisma } from "./prisma"
 import { sendEmail } from "./email"
 
-/** Usuarios activos cuyo rol tiene el permiso dado (ej. "logistics.write"). */
+/**
+ * Usuarios activos cuyo rol tiene el permiso dado (ej. "logistics.write").
+ *
+ * OJO con `admin_general`: ese rol resuelve a acceso total ("*") en
+ * `auth.service.ts` → `flattenRolesAndPermissions` de forma explícita en el
+ * middleware, NO porque tenga filas en `RolePermission` (de hecho tiene
+ * cero — se comprobó en producción al debuggear por qué el aviso de "nuevo
+ * voluntario pendiente" no le llegaba a nadie). Si acá solo mirábamos la
+ * tabla `RolePermission`, un admin_general nunca aparecía en ningún
+ * `usersWithPermission(...)` — se quedaba afuera de CUALQUIER notificación
+ * (esta, la de stock bajo, las que vengan). Por eso se lo suma siempre,
+ * como caso aparte, igual que en el middleware de auth.
+ */
 export async function usersWithPermission(slug: string) {
   return prisma.user.findMany({
     where: {
       status: "active",
-      roles: { some: { role: { permissions: { some: { permission: { slug } } } } } },
+      roles: {
+        some: {
+          role: {
+            OR: [{ slug: "admin_general" }, { permissions: { some: { permission: { slug } } } }],
+          },
+        },
+      },
     },
     select: { id: true, name: true, email: true },
   })
