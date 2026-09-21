@@ -1,10 +1,15 @@
 # PLAN — Fase K: Voluntariado, Presentismo, Cocina, Casos, Stock y Analítica
 
-> Estado: **F + C entregados y en producción (21/09/2026)**. Este documento
-> traduce el pedido de Josecito (21/09/2026) a diseño técnico concreto,
-> contrastado contra el schema y las rutas YA existentes (no se repite
-> trabajo hecho). Sigue en **A) Alta pública de voluntarios**. Actualizar el
-> estado de cada bloque a medida que se entrega.
+> Estado: **F + C + A entregados y en producción (21/09/2026)**. Este
+> documento traduce el pedido de Josecito (21/09/2026) a diseño técnico
+> concreto, contrastado contra el schema y las rutas YA existentes (no se
+> repite trabajo hecho). Sigue en **B) Presentismo y equipos semanales**.
+> Actualizar el estado de cada bloque a medida que se entrega.
+>
+> ⚠️ **Pendiente de vos**: todavía falta crear la cuenta de Resend y pasarme
+> la `RESEND_API_KEY` — sin ella, todo el flujo de A funciona (alta, espera,
+> aprobación/rechazo) pero ningún email sale de verdad todavía (se loguea y
+> se omite, sin romper nada — ver `lib/email.ts`).
 
 ## Método
 
@@ -14,33 +19,51 @@ sus rutas, su UI y su verificación end-to-end antes de pasar al siguiente.
 
 ---
 
-## A) Alta pública de voluntarios (NUEVO)
+## A) Alta pública de voluntarios (NUEVO) ✅ ENTREGADO
 
-**Dónde**: formulario en `vidasolidariamdp.com` (sitio estático en
-`~/domains/vidasolidariamdp.com/public_html/` en el mismo servidor de
-Hostinger — HTML/CSS/JS plano, sección "Sumate" ya existe pero su botón
-"Quiero sumarme ahora" hoy solo linkea a vidasolidaria.org). Se reemplaza ese
-link por un formulario real (nombre, email, teléfono, por qué querés sumarte)
-que postea a un endpoint público nuevo de la API.
+**Construido y deployado (21/09/2026)**, tal cual el diseño original de
+arriba, con dos ajustes que salieron al implementar:
 
-**Backend (nuevo)**:
-- `UserStatus` pasa de `active | suspended` a `active | pending | rejected |
-  suspended` (migración con backfill: todo lo existente queda `active`).
-- `POST /api/public/volunteer-signup` (sin auth, rate-limited): crea un
-  `User` con `status: pending`, sin rol asignado todavía, dispara el email
-  de bienvenida ("recibimos tu registro, la comisión lo va a revisar").
-- Vista de aprobación en `/administracion → Usuarios`: los `pending`
-  aparecen arriba con un switch "Aprobar". Al aprobarlo: se elige el/los
-  rol(es) (reutiliza el flujo de alta que ya existe), pasa a `active`, y
-  dispara el email de bienvenida real ("ya sos parte, tu equipo es X" — el
-  equipo se asigna después, en el bloque B, así que este email puede salir
-  sin equipo todavía y mandarse un segundo aviso cuando se lo asignen).
-  Un switch "Rechazar" pasa a `rejected` (no se manda mail negativo por
-  default, para no generar fricción — se puede agregar si lo pedís).
+- `UserStatus` suma `pending` y `rejected` (todo lo existente quedó
+  `active`, sin tocar) y `User.volunteerMessage` para el motivo que
+  escribe la persona en el formulario.
+- `POST /api/public/volunteer-signup` (sin auth, rate-limit propio de 5
+  intentos/15min por IP — no se sumó `@fastify/rate-limit` como
+  dependencia nueva por un solo endpoint): crea el `User` en `pending`,
+  sin rol ni contraseña, manda el email de "recibimos tu registro" y
+  avisa (in-app + email) a quienes tienen el permiso `users.manage`.
+- `PATCH /api/users/:id/approve` (elige rol, genera contraseña igual que
+  el alta manual, pasa a `active`, manda el email real de bienvenida con
+  el rol asignado — el equipo queda para cuando se entregue el bloque B)
+  y `PATCH /api/users/:id/reject` (pasa a `rejected`, sin mail).
+- `/administracion → Usuarios`: sección "Pendientes de aprobación" arriba
+  de la tabla con el mensaje de cada voluntario, selector de rol y
+  Aprobar/Rechazar.
+- **Sitio estático** (`vidasolidariamdp.com`, fuera de este repo — vive
+  directo en Hostinger): el botón "Quiero sumarme ahora" ahora abre un
+  modal con el formulario real en vez de linkear a vidasolidaria.org.
+- **Ajuste no previsto en el diseño original — CORS**: la API solo
+  aceptaba pedidos desde `gestion.vidasolidariamdp.com`. Ahora acepta
+  cualquier subdominio (o el apex) de `vidasolidariamdp.com` por regla
+  fija en el código, no solo por el env var `CORS_ORIGIN` — se descubrió
+  en el deploy que Hostinger pisa el `.env` del repo con lo que esté
+  cargado en hPanel (Node.js App → Environment variables), así que editar
+  el archivo solo no alcanzaba.
+- **Bug encontrado y corregido de paso**: `usersWithPermission()` (la
+  función que decide a quién avisar) no incluía a `admin_general` porque
+  ese rol resuelve a acceso total en el login sin tener filas reales en
+  `RolePermission` — el único admin de producción se estaba quedando sin
+  ningún aviso (ni este, ni el de stock bajo del bloque F). Corregido.
+
+**Verificado end-to-end en producción**: alta real (201), duplicado (409),
+validación (400), aprobación y rechazo (transición de estado + rol +
+contraseña), notificación al admin llegando después del fix. Todo limpiado
+sin dejar datos de prueba.
 
 **Email**: servicio elegido — **Resend** (plan gratuito, 3.000 emails/mes).
-Cuando lleguemos a este bloque necesito que crees la cuenta y me pases la
-`RESEND_API_KEY` (o me digas que la cargue yo si me das acceso a tu login).
+Sigue faltando que crees la cuenta y me pases la `RESEND_API_KEY` — el
+sistema funciona igual mientras tanto, simplemente no sale ningún mail
+todavía (se loguea y se omite, ver `lib/email.ts`).
 
 ---
 
@@ -227,13 +250,13 @@ sola ruta construida. Se arma `GET /api/analytics/*` (permiso ya existe:
 
 1. ~~**F (catálogo de stock real) + C (ampliar estados de cocina)**~~ —
    **entregado y en producción el 21/09/2026.**
-2. **A (alta pública + aprobación + Resend)** — siguiente. Desbloquea tener
-   email andando, que después reutiliza D. Necesita que Josecito cree la
-   cuenta de Resend y pase la `RESEND_API_KEY` en algún momento de este
-   bloque (no bloquea empezar: el sistema funciona sin ella, solo no manda
-   los mails hasta que se cargue).
-3. **B (presentismo + equipos semanales)** — el más grande de este lote, ya
-   con la pregunta 1 original resuelta (equipos semanales confirmado).
+2. ~~**A (alta pública + aprobación)**~~ — **entregado y en producción el
+   21/09/2026.** Sigue pendiente que Josecito cree la cuenta de Resend y
+   pase la `RESEND_API_KEY` (no bloqueó nada: el sistema funciona sin
+   ella, simplemente no manda los mails hasta que se cargue).
+3. **B (presentismo + equipos semanales)** — siguiente. El más grande de
+   este lote, ya con la pregunta 1 original resuelta (equipos semanales
+   confirmado).
 4. **D (asignación de casos con roles + notificaciones)** y **E (KPI de
    relevamiento + buscador)** — en paralelo, son independientes entre sí.
 5. **G (analítica)** — al final, porque consume datos de todos los
