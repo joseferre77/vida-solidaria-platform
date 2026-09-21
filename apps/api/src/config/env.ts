@@ -13,7 +13,12 @@ const envSchema = z.object({
 
   JWT_ACCESS_SECRET: z.string().min(16, "JWT_ACCESS_SECRET debe tener al menos 16 caracteres"),
   JWT_REFRESH_SECRET: z.string().min(16, "JWT_REFRESH_SECRET debe tener al menos 16 caracteres"),
-  JWT_ACCESS_TTL: z.string().default("15m"),
+  // Antes en 15m: en el uso real de campo (Fase J) un voluntario puede
+  // tardar 5-10 min hablando con la persona antes de guardar el caso, y el
+  // access token vencía a mitad de carga ("sesión cerrada" al guardar).
+  // 2h + el refresh automático agregado en el frontend (ver lib/api-client.ts)
+  // hacen que esto ya no dependa de cuánto tarde una sola carga.
+  JWT_ACCESS_TTL: z.string().default("2h"),
   JWT_REFRESH_TTL_DAYS: z.coerce.number().default(30),
 
   GOOGLE_CLIENT_ID: z.string().optional(),

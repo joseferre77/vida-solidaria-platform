@@ -43,7 +43,7 @@ async function issueSessionCookies(reply: any, userId: string, meta: { userAgent
   const accessToken = signAccessToken({ sub: user.id, roles, permissions })
   const { raw: refreshToken, expiresAt } = await issueRefreshToken(user.id, meta)
 
-  reply.setCookie("access_token", accessToken, { ...COOKIE_OPTS, maxAge: 15 * 60 })
+  reply.setCookie("access_token", accessToken, { ...COOKIE_OPTS, maxAge: 2 * 60 * 60 })
   reply.setCookie("refresh_token", refreshToken, { ...COOKIE_OPTS, expires: expiresAt })
 
   return { id: user.id, name: user.name, email: user.email, roles }
@@ -89,7 +89,7 @@ export async function authRoutes(app: FastifyInstance) {
     const { roles, permissions } = flattenRolesAndPermissions(result.user.roles as any)
     const accessToken = signAccessToken({ sub: result.user.id, roles, permissions })
 
-    reply.setCookie("access_token", accessToken, { ...COOKIE_OPTS, maxAge: 15 * 60 })
+    reply.setCookie("access_token", accessToken, { ...COOKIE_OPTS, maxAge: 2 * 60 * 60 })
     reply.setCookie("refresh_token", result.refreshToken.raw, {
       ...COOKIE_OPTS,
       expires: result.refreshToken.expiresAt,

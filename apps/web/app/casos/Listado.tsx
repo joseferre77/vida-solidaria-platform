@@ -5,14 +5,18 @@ import {
   addCaseContact,
   addCaseMember,
   addCaseMemberNeed,
+  addCaseMemberPhoto,
   addCaseMemberSkill,
   addCaseNeed,
+  addCaseSkill,
   CASE_STATUS_LABEL,
   CASE_STATUSES,
   CASE_TYPE_LABEL,
   changeCaseStatus,
   deleteCaseMember,
+  deleteCaseMemberPhoto,
   deleteCaseMemberSkill,
+  deleteCaseSkill,
   FEASIBILITY_LABEL,
   FEASIBILITIES,
   getCase,
@@ -23,7 +27,9 @@ import {
   NEED_URGENCY_LABEL,
   resolveCaseMemberNeed,
   resolveCaseNeed,
+  STAY_TYPE_LABEL,
   updateCase,
+  uploadCaseFile,
   VIABILITY_LABEL,
   VIABILITIES,
   type CaseDetail,
@@ -43,6 +49,91 @@ const STATUS_COLOR: Record<CaseStatus, string> = {
 
 function formatDateTime(d: string) {
   return new Date(d).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
+}
+
+function mapsLink(lat: number, lng: number) {
+  return `https://www.google.com/maps?q=${lat},${lng}`
+}
+
+/**
+ * Popup para ver una foto grande y compartirla — se abre al tocar/clickear
+ * cualquier foto de un caso o de un integrante. Usa el Web Share API nativo
+ * del celular cuando está disponible (compartir por WhatsApp, etc.) y si no
+ * existe, copia el link de la foto al portapapeles como respaldo.
+ */
+function PhotoLightbox({
+  photos,
+  startIndex,
+  onClose,
+}: {
+  photos: { id: string; url: string }[]
+  startIndex: number
+  onClose: () => void
+}) {
+  const [index, setIndex] = useState(startIndex)
+  const [copied, setCopied] = useState(false)
+  const photo = photos[index]
+
+  if (!photo) return null
+
+  async function handleShare() {
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({ url: photo.url })
+        return
+      }
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(photo.url)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }
+    } catch {
+      // el usuario canceló el share nativo — no hacer nada
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/90 p-4" onClick={onClose}>
+      <button onClick={onClose} className="absolute right-4 top-4 text-2xl text-white/80 hover:text-white">
+        ✕
+      </button>
+
+      <div
+        className="relative flex max-h-[75vh] w-full max-w-lg flex-1 items-center justify-center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {photos.length > 1 && (
+          <button
+            onClick={() => setIndex((index - 1 + photos.length) % photos.length)}
+            className="absolute left-0 z-10 rounded-full bg-black/50 px-3 py-2 text-xl text-white"
+          >
+            ‹
+          </button>
+        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={photo.url} alt="" className="max-h-[75vh] max-w-full rounded-lg object-contain" />
+        {photos.length > 1 && (
+          <button
+            onClick={() => setIndex((index + 1) % photos.length)}
+            className="absolute right-0 z-10 rounded-full bg-black/50 px-3 py-2 text-xl text-white"
+          >
+            ›
+          </button>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+        {photos.length > 1 && (
+          <span className="text-xs text-white/60">
+            {index + 1} / {photos.length}
+          </span>
+        )}
+        <button onClick={handleShare} className="rounded-full bg-yellow px-4 py-2 text-sm font-semibold text-purple-deep">
+          {copied ? "¡Link copiado!" : "Compartir"}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export function Listado({ canWrite, openCaseId }: { canWrite: boolean; openCaseId?: string | null }) {
@@ -156,6 +247,8 @@ function CaseDetailModal({
   const [newNeedUrgency, setNewNeedUrgency] = useState<NeedUrgency>("normal")
   const [closeReason, setCloseReason] = useState("")
   const [showCloseForm, setShowCloseForm] = useState(false)
+  const [newSkillLabel, setNewSkillLabel] = useState("")
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
 
   function load() {
     getCase(id)
@@ -299,6 +392,12 @@ function CaseDetailModal({
               <dd className="text-cream">{detail.approxAge}</dd>
             </>
           )}
+          {detail.sex && (
+            <>
+              <dt className="text-cream/50">Sexo</dt>
+              <dd className="text-cream">{detail.sex}</dd>
+            </>
+          )}
           {detail.phone && (
             <>
               <dt className="text-cream/50">Teléfono</dt>
@@ -317,21 +416,76 @@ function CaseDetailModal({
               <dd className="text-cream">{detail.dayZone}</dd>
             </>
           )}
-          {detail.healthStatus && (
+          {detail.stayType && (
             <>
-              <dt className="text-cream/50">Salud</dt>
-              <dd className="text-cream">{detail.healthStatus}</dd>
+              <dt className="text-cream/50">Permanencia</dt>
+              <dd className="text-cream">{STAY_TYPE_LABEL[detail.stayType]}</dd>
+            </>
+          )}
+          {detail.currentSleepSpot && (
+            <>
+              <dt className="text-cream/50">Dónde duerme</dt>
+              <dd className="text-cream">{detail.currentSleepSpot}</dd>
+            </>
+          )}
+          {detail.wantsToWork !== null && (
+            <>
+              <dt className="text-cream/50">¿Quiere trabajar?</dt>
+              <dd className="text-cream">{detail.wantsToWork ? "Sí" : "No"}</dd>
+            </>
+          )}
+          {detail.workAptitude && (
+            <>
+              <dt className="text-cream/50">Aptitud / oficio</dt>
+              <dd className="text-cream">{detail.workAptitude}</dd>
             </>
           )}
         </dl>
 
+        {(detail.healthStatus || detail.legalSituation || detail.substanceUse || detail.closeReason) && (
+          <div className="mb-4 space-y-1.5 text-sm">
+            {detail.healthStatus && (
+              <p>
+                <span className="text-cream/50">Salud:</span> <span className="text-cream">{detail.healthStatus}</span>
+              </p>
+            )}
+            {detail.legalSituation && (
+              <p>
+                <span className="text-cream/50">Situación legal:</span>{" "}
+                <span className="text-cream">{detail.legalSituation}</span>
+              </p>
+            )}
+            {detail.substanceUse && (
+              <p>
+                <span className="text-cream/50">Consumo:</span> <span className="text-cream">{detail.substanceUse}</span>
+              </p>
+            )}
+            {detail.status === "cerrado" && detail.closeReason && (
+              <p>
+                <span className="text-cream/50">Motivo de cierre:</span>{" "}
+                <span className="text-cream">{detail.closeReason}</span>
+              </p>
+            )}
+          </div>
+        )}
+
         {detail.photos.length > 0 && (
           <div className="mb-4 grid grid-cols-4 gap-1.5">
-            {detail.photos.map((p) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={p.id} src={p.url} alt="" className="aspect-square rounded-lg object-cover" />
+            {detail.photos.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setLightboxIndex(i)}
+                className="aspect-square overflow-hidden rounded-lg"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.url} alt="" className="h-full w-full object-cover" />
+              </button>
             ))}
           </div>
+        )}
+        {lightboxIndex !== null && (
+          <PhotoLightbox photos={detail.photos} startIndex={lightboxIndex} onClose={() => setLightboxIndex(null)} />
         )}
 
         <div className="mb-4">
@@ -394,6 +548,78 @@ function CaseDetailModal({
           )}
         </div>
 
+        <div className="mb-4">
+          <h3 className="mb-2 text-sm font-semibold text-cream">
+            Habilidades{detail.caseType !== "individual" ? " (referente)" : ""}
+          </h3>
+          {detail.skills.map((s) => (
+            <div key={s.id} className="mb-1.5 flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-xs">
+              <span className="text-cream">
+                {s.skillLabel}
+                {s.level ? ` — ${s.level}` : ""}
+              </span>
+              {canWrite && (
+                <button
+                  onClick={async () => {
+                    await deleteCaseSkill(id, s.id)
+                    load()
+                    onChanged()
+                  }}
+                  className="text-orange hover:underline"
+                >
+                  Quitar
+                </button>
+              )}
+            </div>
+          ))}
+          {detail.skills.length === 0 && <p className="text-xs text-cream/40">Sin habilidades cargadas.</p>}
+          {canWrite && (
+            <div className="mt-2 flex gap-2">
+              <input
+                value={newSkillLabel}
+                onChange={(e) => setNewSkillLabel(e.target.value)}
+                placeholder="Ej: electricista"
+                className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+              />
+              <button
+                onClick={async () => {
+                  if (!newSkillLabel.trim()) return
+                  await addCaseSkill(id, { skillLabel: newSkillLabel.trim() })
+                  setNewSkillLabel("")
+                  load()
+                  onChanged()
+                }}
+                className="rounded-lg bg-yellow px-3 text-xs font-semibold text-purple-deep"
+              >
+                + Agregar
+              </button>
+            </div>
+          )}
+        </div>
+
+        {detail.locations.length > 0 && (
+          <div className="mb-4">
+            <h3 className="mb-2 text-sm font-semibold text-cream">Ubicaciones registradas</h3>
+            <div className="space-y-1.5">
+              {detail.locations.map((l) => (
+                <div key={l.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-xs">
+                  <span className="text-cream/70">
+                    {formatDateTime(l.recordedAt)} · {l.recordedBy?.name ?? "—"}
+                  </span>
+                  <a
+                    href={mapsLink(l.lat, l.lng)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-yellow hover:underline"
+                  >
+                    Ver en mapa
+                  </a>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {(detail.caseType !== "individual" || detail.members.length > 0) && (
           <MembersSection id={id} members={detail.members} canWrite={canWrite} onChanged={() => { load(); onChanged() }} />
         )}
@@ -439,6 +665,11 @@ function CaseDetailModal({
             </div>
           )}
         </div>
+
+        <p className="border-t border-white/10 pt-3 text-[11px] text-cream/40">
+          Cargado por {detail.createdBy?.name ?? "—"} el {formatDateTime(detail.createdAt)}
+          {detail.updatedBy && <> · última edición: {detail.updatedBy.name}</>}
+        </p>
       </div>
     </div>
   )
@@ -510,6 +741,22 @@ function MemberCard({
   const [newNeedCategory, setNewNeedCategory] = useState<NeedCategory>("salud")
   const [newNeedUrgency, setNewNeedUrgency] = useState<NeedUrgency>("normal")
   const [newSkill, setNewSkill] = useState("")
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+
+  async function handlePhotoInput(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setUploadingPhoto(true)
+    try {
+      for (const file of Array.from(files)) {
+        const res = await uploadCaseFile(file)
+        await addCaseMemberPhoto(id, member.id, res.fileUrl)
+      }
+      onChanged()
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
 
   return (
     <div className="rounded-xl border border-white/15 bg-white/5 p-3">
@@ -565,6 +812,53 @@ function MemberCard({
               <span className="text-cream/50">Consumo:</span> {member.substanceUse}
             </p>
           )}
+
+          <div>
+            <p className="mb-1 font-medium text-cream">Fotos</p>
+            {member.photos.length > 0 && (
+              <div className="mb-1.5 grid grid-cols-4 gap-1">
+                {member.photos.map((p, i) => (
+                  <div key={p.id} className="group relative aspect-square overflow-hidden rounded-lg">
+                    <button type="button" onClick={() => setLightboxIndex(i)} className="h-full w-full">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.url} alt="" className="h-full w-full object-cover" />
+                    </button>
+                    {canWrite && (
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          await deleteCaseMemberPhoto(id, member.id, p.id)
+                          onChanged()
+                        }}
+                        className="absolute right-0.5 top-0.5 rounded-full bg-black/60 px-1 text-[10px] text-white opacity-0 group-hover:opacity-100"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {member.photos.length === 0 && <p className="text-cream/40">Sin fotos cargadas.</p>}
+            {canWrite && (
+              <label className="mt-1.5 inline-block cursor-pointer rounded-lg border border-white/20 px-2 py-1 text-cream">
+                {uploadingPhoto ? "Subiendo..." : "📷 Agregar foto"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  onChange={(e) => handlePhotoInput(e.target.files)}
+                  disabled={uploadingPhoto}
+                  className="hidden"
+                />
+              </label>
+            )}
+            {lightboxIndex !== null && (
+              <PhotoLightbox photos={member.photos} startIndex={lightboxIndex} onClose={() => setLightboxIndex(null)} />
+            )}
+          </div>
 
           <div>
             <p className="mb-1 font-medium text-cream">Necesidades</p>

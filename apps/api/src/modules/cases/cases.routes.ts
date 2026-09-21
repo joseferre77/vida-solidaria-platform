@@ -63,6 +63,7 @@ const memberInputSchema = z.object({
   substanceUse: z.string().trim().optional(),
   needs: z.array(needInputSchema).optional(),
   skills: z.array(skillInputSchema).optional(),
+  photoUrls: z.array(z.string().url()).optional(),
 })
 
 const updateMemberSchema = z.object({
@@ -161,7 +162,9 @@ async function nextCaseNumber() {
 const CASE_DETAIL_INCLUDE = {
   contactsHistory: { orderBy: { contactedAt: "desc" as const } },
   locations: { orderBy: { recordedAt: "desc" as const } },
-  photos: { orderBy: { takenAt: "desc" as const } },
+  // Solo fotos del caso/referente acá — las de cada integrante van dentro
+  // de `members[].photos` (ver abajo), para no duplicarlas ni mezclarlas.
+  photos: { where: { caseMemberId: null }, orderBy: { takenAt: "desc" as const } },
   skills: true,
   needs: { orderBy: { createdAt: "desc" as const } },
   statusHistory: { orderBy: { changedAt: "desc" as const } },
@@ -170,6 +173,7 @@ const CASE_DETAIL_INCLUDE = {
     include: {
       needs: { orderBy: { createdAt: "desc" as const } },
       skills: true,
+      photos: { orderBy: { takenAt: "desc" as const } },
     },
   },
 }
@@ -189,6 +193,10 @@ function serializeSkill(x: any) {
   return { id: x.id, skillLabel: x.skillLabel, level: x.level }
 }
 
+function serializePhoto(x: any, users: Map<string, { id: string; name: string; email: string }>) {
+  return { id: x.id, url: x.url, takenAt: x.takenAt, uploadedBy: users.get(x.uploadedBy) ?? null }
+}
+
 async function serializeCaseDetail(c: any) {
   const users = await userMapFor([
     c.createdBy,
@@ -197,6 +205,7 @@ async function serializeCaseDetail(c: any) {
     ...c.locations.map((x: any) => x.recordedBy),
     ...c.photos.map((x: any) => x.uploadedBy),
     ...c.statusHistory.map((x: any) => x.changedBy),
+    ...c.members.flatMap((m: any) => m.photos.map((p: any) => p.uploadedBy)),
   ])
   return {
     id: c.id,
@@ -238,12 +247,7 @@ async function serializeCaseDetail(c: any) {
       recordedAt: x.recordedAt,
       recordedBy: users.get(x.recordedBy) ?? null,
     })),
-    photos: c.photos.map((x: any) => ({
-      id: x.id,
-      url: x.url,
-      takenAt: x.takenAt,
-      uploadedBy: users.get(x.uploadedBy) ?? null,
-    })),
+    photos: c.photos.map((x: any) => serializePhoto(x, users)),
     skills: c.skills.map(serializeSkill),
     needs: c.needs.map(serializeNeed),
     statusHistory: c.statusHistory.map((x: any) => ({
@@ -267,6 +271,7 @@ async function serializeCaseDetail(c: any) {
       createdAt: m.createdAt,
       needs: m.needs.map(serializeNeed),
       skills: m.skills.map(serializeSkill),
+      photos: m.photos.map((x: any) => serializePhoto(x, users)),
     })),
   }
 }
@@ -360,6 +365,9 @@ export async function casesRoutes(app: FastifyInstance) {
             substanceUse: m.substanceUse,
             needs: m.needs?.length ? { create: m.needs.map((n) => ({ ...n, caseId: caseRecord.id })) } : undefined,
             skills: m.skills?.length ? { create: m.skills.map((s) => ({ ...s, caseId: caseRecord.id })) } : undefined,
+            photos: m.photoUrls?.length
+              ? { create: m.photoUrls.map((url) => ({ url, uploadedBy: userId, caseId: caseRecord.id })) }
+              : undefined,
           },
         })
       }
@@ -484,6 +492,7 @@ export async function casesRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { id } = request.params as { id: string }
       const body = memberInputSchema.parse(request.body)
+      const userId = request.user!.sub
       await prisma.caseMember.create({
         data: {
           caseId: id,
@@ -499,6 +508,9 @@ export async function casesRoutes(app: FastifyInstance) {
           substanceUse: body.substanceUse,
           needs: body.needs?.length ? { create: body.needs.map((n) => ({ ...n, caseId: id })) } : undefined,
           skills: body.skills?.length ? { create: body.skills.map((s) => ({ ...s, caseId: id })) } : undefined,
+          photos: body.photoUrls?.length
+            ? { create: body.photoUrls.map((url) => ({ url, uploadedBy: userId, caseId: id })) }
+            : undefined,
         },
       })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
@@ -571,6 +583,31 @@ export async function casesRoutes(app: FastifyInstance) {
     async (request) => {
       const { id, skillId } = request.params as { id: string; memberId: string; skillId: string }
       await prisma.caseSkill.delete({ where: { id: skillId } })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return serializeCaseDetail(updated)
+    },
+  )
+
+  app.post(
+    "/cases/:id/members/:memberId/photos",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request, reply) => {
+      const { id, memberId } = request.params as { id: string; memberId: string }
+      const body = photoSchema.parse(request.body)
+      await prisma.casePhoto.create({
+        data: { caseId: id, caseMemberId: memberId, uploadedBy: request.user!.sub, ...body },
+      })
+      const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+      return reply.code(201).send(await serializeCaseDetail(updated))
+    },
+  )
+
+  app.delete(
+    "/cases/:id/members/:memberId/photos/:photoId",
+    { preHandler: [requireAuth, requirePermission("cases.write")] },
+    async (request) => {
+      const { id, photoId } = request.params as { id: string; memberId: string; photoId: string }
+      await prisma.casePhoto.delete({ where: { id: photoId } })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },

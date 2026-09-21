@@ -774,9 +774,10 @@ model CaseMember {
   substanceUse   String?  @map("substance_use")
   createdAt      DateTime @default(now()) @map("created_at")
 
-  case  Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  needs CaseNeed[]
+  case   Case         @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  needs  CaseNeed[]
   skills CaseSkill[]
+  photos CasePhoto[]
 
   @@map("case_members")
 }
@@ -811,13 +812,15 @@ model CaseLocation {
 }
 
 model CasePhoto {
-  id         String   @id @default(uuid())
-  caseId     String   @map("case_id")
-  url        String
-  uploadedBy String   @map("uploaded_by")
-  takenAt    DateTime @default(now()) @map("taken_at")
+  id           String   @id @default(uuid())
+  caseId       String   @map("case_id")
+  caseMemberId String?  @map("case_member_id") // null = del caso/referente; seteado = foto de un integrante puntual
+  url          String
+  uploadedBy   String   @map("uploaded_by")
+  takenAt      DateTime @default(now()) @map("taken_at")
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case   Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  member CaseMember? @relation(fields: [caseMemberId], references: [id], onDelete: Cascade)
 
   @@map("case_photos")
 }

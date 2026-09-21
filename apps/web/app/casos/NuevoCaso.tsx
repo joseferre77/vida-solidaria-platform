@@ -44,6 +44,7 @@ type MemberDraft = {
   workAptitude: string
   legalSituation: string
   substanceUse: string
+  photoUrls: string[]
 }
 
 const EMPTY_MEMBER: MemberDraft = {
@@ -57,6 +58,7 @@ const EMPTY_MEMBER: MemberDraft = {
   workAptitude: "",
   legalSituation: "",
   substanceUse: "",
+  photoUrls: [],
 }
 
 type StepKey = "basicos" | "integrantes" | "ubicacion" | "diagnostico" | "necesidades" | "fotos" | "revisar"
@@ -108,6 +110,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
   // Paso "fotos"
   const [photoUrls, setPhotoUrls] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
+  const [uploadingMemberIndex, setUploadingMemberIndex] = useState<number | null>(null)
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -164,6 +167,28 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
     }
   }
 
+  async function handleMemberPhotoInput(i: number, files: FileList | null) {
+    if (!files || files.length === 0) return
+    setUploadingMemberIndex(i)
+    setError(null)
+    try {
+      const uploaded: string[] = []
+      for (const file of Array.from(files)) {
+        const res = await uploadCaseFile(file)
+        uploaded.push(res.fileUrl)
+      }
+      setMembers((prev) => {
+        const next = [...prev]
+        next[i] = { ...next[i], photoUrls: [...next[i].photoUrls, ...uploaded] }
+        return next
+      })
+    } catch (err: any) {
+      setError(err.message ?? "No se pudo subir la foto")
+    } finally {
+      setUploadingMemberIndex(null)
+    }
+  }
+
   function canAdvance() {
     if (currentStep === "basicos") return fullName.trim().length >= 2
     if (currentStep === "ubicacion") return Boolean(lat && lng)
@@ -193,6 +218,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
           workAptitude: m.workAptitude.trim() || undefined,
           legalSituation: m.legalSituation.trim() || undefined,
           substanceUse: m.substanceUse.trim() || undefined,
+          photoUrls: m.photoUrls.length ? m.photoUrls : undefined,
         }))
 
       const result = await createCase({
@@ -444,7 +470,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
                   rows={2}
                 />
               </label>
-              <label className="block">
+              <label className="mb-2 block">
                 <span className={labelCls}>Consumo problemático (si observás)</span>
                 <textarea
                   value={m.substanceUse}
@@ -453,6 +479,30 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
                   rows={2}
                 />
               </label>
+
+              <span className={labelCls}>Foto del integrante (opcional)</span>
+              <label className="mb-2 block cursor-pointer rounded-xl border border-white/20 bg-white/5 px-3 py-2.5 text-center text-sm text-cream">
+                {uploadingMemberIndex === i ? "Subiendo..." : "📷 Sacar / elegir foto"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  onChange={(e) => handleMemberPhotoInput(i, e.target.files)}
+                  disabled={uploadingMemberIndex !== null}
+                  className="hidden"
+                />
+              </label>
+              {m.photoUrls.length > 0 && (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {m.photoUrls.map((url) => (
+                    <div key={url} className="aspect-square overflow-hidden rounded-lg border border-white/15">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt="" className="h-full w-full object-cover" />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 

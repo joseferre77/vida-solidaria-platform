@@ -1,37 +1,15 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"
-
-async function apiFetch(path: string, init?: RequestInit) {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error ?? `Error ${res.status}`)
-  }
-  if (res.status === 204) return null
-  return res.json()
-}
+import { apiFetch, apiUpload } from "./api-client"
 
 /**
  * Sube un archivo real a POST /api/uploads (multipart/form-data), igual
  * que en projects.ts — se repite acá para no acoplar el módulo de Casos
- * al de Proyectos.
+ * al de Proyectos. apiUpload reintenta sola tras un refresh si la sesión
+ * venció a mitad de carga (ver lib/api-client.ts).
  */
 export async function uploadCaseFile(file: File): Promise<{ fileUrl: string; fileName: string }> {
   const formData = new FormData()
   formData.append("file", file)
-  const res = await fetch(`${API_URL}/api/uploads`, {
-    method: "POST",
-    credentials: "include",
-    body: formData,
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error ?? `Error ${res.status}`)
-  }
-  return res.json()
+  return apiUpload("/api/uploads", formData)
 }
 
 export const CASE_TYPES = ["individual", "pareja", "grupo_familiar"] as const
@@ -184,6 +162,7 @@ export interface CaseMemberItem {
   createdAt: string
   needs: CaseNeedItem[]
   skills: CaseSkillItem[]
+  photos: CasePhotoItem[]
 }
 
 export interface CaseDetail {
@@ -264,6 +243,7 @@ export interface CreateCaseMemberInput {
   substanceUse?: string
   needs?: { category: NeedCategory; urgency: NeedUrgency; notes?: string }[]
   skills?: { skillLabel: string; level?: string }[]
+  photoUrls?: string[]
 }
 
 export const createCase = (data: CreateCaseInput) =>
@@ -352,3 +332,12 @@ export const addCaseMemberSkill = (id: string, memberId: string, data: { skillLa
 
 export const deleteCaseMemberSkill = (id: string, memberId: string, skillId: string) =>
   apiFetch(`/api/cases/${id}/members/${memberId}/skills/${skillId}`, { method: "DELETE" })
+
+export const addCaseMemberPhoto = (id: string, memberId: string, url: string) =>
+  apiFetch(`/api/cases/${id}/members/${memberId}/photos`, {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  }) as Promise<CaseDetail>
+
+export const deleteCaseMemberPhoto = (id: string, memberId: string, photoId: string) =>
+  apiFetch(`/api/cases/${id}/members/${memberId}/photos/${photoId}`, { method: "DELETE" })
