@@ -223,7 +223,28 @@ export interface CaseDetail {
   statusHistory: CaseStatusHistoryItem[]
   assignments: CaseAssignmentItem[]
   members: CaseMemberItem[]
+  surveyStartedAt: string | null
 }
+
+/**
+ * Resultado del buscador anti-duplicados (bloque E). `matchedMember` viene
+ * seteado cuando el texto coincidió con un integrante del grupo y no con
+ * el/la referente — se muestra como "vía integrante: <nombre>" para que
+ * quien busca entienda por qué apareció ese caso.
+ */
+export interface CaseSearchResult {
+  id: string
+  caseNumber: string
+  fullName: string
+  alias: string | null
+  dni: string | null
+  status: CaseStatus
+  caseType: CaseType
+  matchedMember: string | null
+}
+
+export const searchCases = (q: string) =>
+  apiFetch(`/api/cases/search?q=${encodeURIComponent(q)}`) as Promise<CaseSearchResult[]>
 
 export const listCases = (status?: CaseStatus) =>
   apiFetch(`/api/cases${status ? `?status=${status}` : ""}`) as Promise<CaseListItem[]>
@@ -253,6 +274,9 @@ export interface CreateCaseInput {
   photoUrls?: string[]
   // Resto del grupo cuando caseType es "pareja" / "grupo_familiar".
   members?: CreateCaseMemberInput[]
+  // Fase K bloque E: timestamp que captura el frontend al abrir el
+  // formulario, para medir el "tiempo de carga" (createdAt - surveyStartedAt).
+  surveyStartedAt?: string
 }
 
 export interface CreateCaseMemberInput {

@@ -20,6 +20,9 @@ export default function CasosPage() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined)
   const [activeTab, setActiveTab] = useState<TabKey>("nuevo")
   const [lastCreatedCaseNumber, setLastCreatedCaseNumber] = useState<string | null>(null)
+  // Bloque E: cuando el buscador anti-duplicados de "Nuevo caso" encuentra
+  // una coincidencia, se navega directo a ese caso existente en el listado.
+  const [openCaseId, setOpenCaseId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchMe().then((u) => {
@@ -76,12 +79,19 @@ export default function CasosPage() {
       {currentTab === "nuevo" && (
         <NuevoCaso
           onCreated={(caseNumber) => {
+            setOpenCaseId(null)
             setLastCreatedCaseNumber(caseNumber)
+            setActiveTab("listado")
+          }}
+          onSelectExistingCase={(caseId) => {
+            setOpenCaseId(caseId)
             setActiveTab("listado")
           }}
         />
       )}
-      {currentTab === "listado" && <Listado canWrite={canWrite} key={lastCreatedCaseNumber ?? "list"} />}
+      {currentTab === "listado" && (
+        <Listado canWrite={canWrite} openCaseId={openCaseId} key={lastCreatedCaseNumber ?? openCaseId ?? "list"} />
+      )}
     </main>
   )
 }

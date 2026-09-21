@@ -748,6 +748,13 @@ model Case {
   viability       CaseViability?
   feasibility     CaseFeasibility?
   closeReason     String?          @map("close_reason")
+  // Fase K bloque E — timestamp de carga: lo setea el FRONTEND al abrir el
+  // formulario "Nuevo caso" (no acá al guardar), así el KPI de "tiempo de
+  // carga" sale de restar createdAt - surveyStartedAt. Si el formulario se
+  // abre y se abandona sin guardar, no genera ningún dato — correcto, no
+  // llegó a existir un Case. Opcional porque los casos ya cargados antes
+  // de este bloque no lo tienen.
+  surveyStartedAt DateTime?        @map("survey_started_at")
 
   contactsHistory CaseContactHistory[]
   locations       CaseLocation[]

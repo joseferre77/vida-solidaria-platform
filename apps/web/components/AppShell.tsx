@@ -56,6 +56,12 @@ const NAV_ITEMS: {
     visible: (u) =>
       hasPermission(u, "projects.admin") || hasPermission(u, "surveys.manage") || hasPermission(u, "users.manage"),
   },
+  {
+    href: "/analitica",
+    label: "Analítica",
+    icon: "📊",
+    visible: (u) => hasPermission(u, "analytics.read"),
+  },
 ]
 
 const SECTION_TITLE: { test: (path: string) => boolean; label: string }[] = [
@@ -64,6 +70,7 @@ const SECTION_TITLE: { test: (path: string) => boolean; label: string }[] = [
   { test: (p) => p.startsWith("/proyectos"), label: "Proyectos" },
   { test: (p) => p.startsWith("/equipos"), label: "Equipos y Secciones" },
   { test: (p) => p.startsWith("/administracion"), label: "Administración" },
+  { test: (p) => p.startsWith("/analitica"), label: "Analítica" },
 ]
 
 function sectionTitleFor(path: string) {

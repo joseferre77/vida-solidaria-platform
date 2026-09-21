@@ -17,6 +17,7 @@ import { logisticsRoutes } from "./modules/logistics/logistics.routes"
 import { casesRoutes } from "./modules/cases/cases.routes"
 import { notificationsRoutes } from "./modules/notifications/notifications.routes"
 import { publicRoutes } from "./modules/public/public.routes"
+import { analyticsRoutes } from "./modules/analytics/analytics.routes"
 
 async function main() {
   const app = Fastify({
@@ -116,6 +117,7 @@ async function main() {
   await app.register(casesRoutes, { prefix: "/api" })
   await app.register(notificationsRoutes, { prefix: "/api" })
   await app.register(publicRoutes, { prefix: "/api" })
+  await app.register(analyticsRoutes, { prefix: "/api" })
 
   // TODO (Módulo 4+): registrar acá finance.routes (donaciones/compras/rendición).
   // logistics/field-ops/cases todavía sin Socket.IO (ver notas en esos módulos).

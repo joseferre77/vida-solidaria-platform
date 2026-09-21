@@ -128,6 +128,10 @@ const createCaseSchema = z.object({
   mainPhotoUrl: z.string().url().optional(),
   // Toda carga de campo trae al menos una ubicación (de dónde se relevó).
   location: z.object({ lat: z.number(), lng: z.number() }),
+  // Fase K bloque E: lo manda el frontend con el momento en que se abrió
+  // el formulario "Nuevo caso" (no ahora, al guardar) — ver nota en el
+  // schema. Opcional por si algún cliente viejo no lo manda todavía.
+  surveyStartedAt: z.string().datetime().optional(),
   needs: z.array(needInputSchema).optional(),
   skills: z.array(skillInputSchema).optional(),
   photoUrls: z.array(z.string().url()).optional(),
@@ -274,6 +278,7 @@ async function serializeCaseDetail(c: any) {
     viability: c.viability,
     feasibility: c.feasibility,
     closeReason: c.closeReason,
+    surveyStartedAt: c.surveyStartedAt,
     createdAt: c.createdAt,
     createdBy: users.get(c.createdBy) ?? null,
     updatedBy: c.updatedBy ? (users.get(c.updatedBy) ?? null) : null,
@@ -354,6 +359,57 @@ export async function casesRoutes(app: FastifyInstance) {
     }))
   })
 
+  // Fase K bloque E — buscador anti-duplicados: primer paso del flujo
+  // "Nuevo caso" en el frontend, para chequear si la persona ya está
+  // cargada (como referente O como integrante de un grupo/pareja) antes
+  // de crear un caso nuevo. `q` busca por nombre, alias o DNI con
+  // coincidencia parcial e insensible a mayúsculas — igual criterio en
+  // los tres campos. Requiere al menos 2 caracteres para no traer medio
+  // padrón con una sola letra.
+  app.get("/cases/search", { preHandler: [requireAuth, requirePermission("cases.read")] }, async (request) => {
+    const { q } = request.query as { q?: string }
+    const query = (q ?? "").trim()
+    if (query.length < 2) return []
+
+    const textFilter = (field: "fullName" | "alias" | "dni") => ({
+      [field]: { contains: query, mode: "insensitive" as const },
+    })
+
+    const [directMatches, memberMatches] = await Promise.all([
+      prisma.case.findMany({
+        where: { OR: [textFilter("fullName"), textFilter("alias"), textFilter("dni")] },
+        select: { id: true, caseNumber: true, fullName: true, alias: true, dni: true, status: true, caseType: true },
+        take: 20,
+      }),
+      prisma.caseMember.findMany({
+        where: { OR: [textFilter("fullName"), textFilter("alias"), textFilter("dni")] },
+        select: {
+          fullName: true,
+          case: {
+            select: { id: true, caseNumber: true, fullName: true, alias: true, dni: true, status: true, caseType: true },
+          },
+        },
+        take: 20,
+      }),
+    ])
+
+    // Un mismo caso puede aparecer por las dos vías (ej. coincide el
+    // referente Y un integrante) — se deduplica por id de caso, y si
+    // matcheó por un integrante se guarda su nombre para mostrarlo
+    // ("via integrante: Juan Pérez") y que quien busca entienda por qué
+    // apareció ese caso.
+    const results = new Map<string, { id: string; caseNumber: string; fullName: string; alias: string | null; dni: string | null; status: string; caseType: string; matchedMember: string | null }>()
+    for (const c of directMatches) {
+      results.set(c.id, { ...c, matchedMember: null })
+    }
+    for (const m of memberMatches) {
+      if (!results.has(m.case.id)) {
+        results.set(m.case.id, { ...m.case, matchedMember: m.fullName })
+      }
+    }
+    return Array.from(results.values()).slice(0, 20)
+  })
+
   app.get("/cases/:id", { preHandler: [requireAuth, requirePermission("cases.read")] }, async (request) => {
     const { id } = request.params as { id: string }
     const c = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
@@ -390,6 +446,7 @@ export async function casesRoutes(app: FastifyInstance) {
           legalSituation: body.legalSituation,
           substanceUse: body.substanceUse,
           mainPhotoUrl: body.mainPhotoUrl,
+          surveyStartedAt: body.surveyStartedAt ? new Date(body.surveyStartedAt) : undefined,
           createdBy: userId,
           locations: { create: { lat: body.location.lat, lng: body.location.lng, recordedBy: userId } },
           needs: body.needs?.length ? { create: body.needs } : undefined,

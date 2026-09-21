@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
+  CASE_STATUS_LABEL,
   CASE_TYPE_LABEL,
   CASE_TYPES,
   createCase,
@@ -9,9 +10,12 @@ import {
   NEED_CATEGORY_LABEL,
   NEED_URGENCIES,
   NEED_URGENCY_LABEL,
+  searchCases,
   STAY_TYPE_LABEL,
   STAY_TYPES,
   uploadCaseFile,
+  type CaseSearchResult,
+  type CaseStatus,
   type CaseType,
   type CreateCaseMemberInput,
   type NeedCategory,
@@ -29,6 +33,14 @@ import {
  * un paso de "Integrantes" — el paso 1 sigue siendo el referente del
  * grupo, y acá se agrega el resto de las personas, cada una con sus
  * propios datos y diagnóstico (antes esto no se podía cargar).
+ *
+ * Fase K bloque E: se suma "buscar" como paso 0, antes que nada — un
+ * buscador anti-duplicados (GET /cases/search) para que quien releva
+ * chequee si la persona ya tiene un caso cargado antes de duplicarlo. Si
+ * encuentra coincidencia puede saltar directo al caso existente
+ * (onSelectExistingCase). También se captura acá `surveyStartedAt` (al
+ * montar el componente / al reiniciar con "Cargar otro caso") para medir
+ * el tiempo de carga del relevamiento como KPI (createdAt - surveyStartedAt).
  */
 
 type NeedDraft = { category: NeedCategory; urgency: NeedUrgency; notes: string }
@@ -61,7 +73,7 @@ const EMPTY_MEMBER: MemberDraft = {
   photoUrls: [],
 }
 
-type StepKey = "basicos" | "integrantes" | "ubicacion" | "diagnostico" | "necesidades" | "fotos" | "revisar"
+type StepKey = "buscar" | "basicos" | "integrantes" | "ubicacion" | "diagnostico" | "necesidades" | "fotos" | "revisar"
 
 const bigButton =
   "w-full rounded-2xl border-2 px-5 py-4 text-left text-base font-medium transition active:scale-[0.98]"
@@ -73,8 +85,23 @@ const navBtnPrimary =
 const navBtnSecondary =
   "flex-1 rounded-2xl border border-white/20 px-5 py-4 text-center text-base text-cream hover:bg-white/5"
 
-export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => void }) {
+export function NuevoCaso({
+  onCreated,
+  onSelectExistingCase,
+}: {
+  onCreated: (caseNumber: string) => void
+  onSelectExistingCase: (caseId: string) => void
+}) {
   const [stepIndex, setStepIndex] = useState(0)
+
+  // Paso "buscar" (bloque E — anti-duplicados)
+  const [dedupQuery, setDedupQuery] = useState("")
+  const [dedupResults, setDedupResults] = useState<CaseSearchResult[]>([])
+  const [dedupSearching, setDedupSearching] = useState(false)
+
+  // Bloque E — timestamp de inicio de carga, para el KPI de tiempo de
+  // relevamiento. Se recaptura en resetAll() al empezar un caso nuevo.
+  const [surveyStartedAt, setSurveyStartedAt] = useState(() => new Date().toISOString())
 
   // Paso "basicos" (referente del grupo si es pareja/grupo familiar)
   const [caseType, setCaseType] = useState<CaseType>("individual")
@@ -118,6 +145,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
 
   const isGroup = caseType !== "individual"
   const steps: StepKey[] = [
+    "buscar",
     "basicos",
     ...(isGroup ? (["integrantes"] as const) : []),
     "ubicacion",
@@ -127,6 +155,25 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
     "revisar",
   ]
   const currentStep = steps[stepIndex] ?? steps[0]
+
+  // Buscador anti-duplicados: dispara la búsqueda 350ms después de que la
+  // persona deja de tipear (evita pegarle al endpoint en cada tecla).
+  useEffect(() => {
+    const q = dedupQuery.trim()
+    if (q.length < 2) {
+      setDedupResults([])
+      setDedupSearching(false)
+      return
+    }
+    setDedupSearching(true)
+    const handle = setTimeout(() => {
+      searchCases(q)
+        .then(setDedupResults)
+        .catch(() => setDedupResults([]))
+        .finally(() => setDedupSearching(false))
+    }, 350)
+    return () => clearTimeout(handle)
+  }, [dedupQuery])
 
   function useMyLocation() {
     if (!navigator.geolocation) {
@@ -245,6 +292,7 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
         skills: skills.filter((s) => s.skillLabel.trim()).map((s) => ({ skillLabel: s.skillLabel.trim(), level: s.level.trim() || undefined })),
         photoUrls: photoUrls.length ? photoUrls : undefined,
         members: memberInputs.length ? memberInputs : undefined,
+        surveyStartedAt,
       })
       setDone(result.caseNumber)
     } catch (err: any) {
@@ -256,6 +304,9 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
 
   function resetAll() {
     setStepIndex(0)
+    setDedupQuery("")
+    setDedupResults([])
+    setSurveyStartedAt(new Date().toISOString())
     setCaseType("individual")
     setFullName("")
     setAlias("")
@@ -317,6 +368,60 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
       </div>
 
       {error && <p className="mb-4 rounded-xl bg-orange/10 px-4 py-2 text-sm text-orange">{error}</p>}
+
+      {currentStep === "buscar" && (
+        <section>
+          <h2 className="mb-1 font-display text-lg font-bold text-yellow">¿Ya existe este caso?</h2>
+          <p className="mb-4 text-sm text-cream/60">
+            Buscá por nombre, alias o DNI antes de cargar — así evitamos duplicar un caso que ya está en el sistema.
+          </p>
+
+          <label className="mb-3 block">
+            <span className={labelCls}>Nombre, alias o DNI</span>
+            <input
+              value={dedupQuery}
+              onChange={(e) => setDedupQuery(e.target.value)}
+              className={inputCls}
+              placeholder="Escribí para buscar..."
+              autoFocus
+            />
+          </label>
+
+          {dedupSearching && <p className="mb-3 text-xs text-cream/40">Buscando...</p>}
+
+          {!dedupSearching && dedupQuery.trim().length >= 2 && dedupResults.length === 0 && (
+            <p className="mb-3 text-xs text-cream/40">Sin coincidencias — parece un caso nuevo.</p>
+          )}
+
+          {dedupResults.length > 0 && (
+            <div className="mb-2 space-y-2">
+              {dedupResults.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => onSelectExistingCase(r.id)}
+                  className="w-full rounded-xl border border-orange/40 bg-orange/10 px-4 py-3 text-left hover:border-orange"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-cream">{r.fullName}</span>
+                    <span className="text-xs text-cream/40">{r.caseNumber}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-cream/50">
+                    {r.alias && <span>Alias: {r.alias} · </span>}
+                    {r.dni && <span>DNI: {r.dni} · </span>}
+                    {CASE_STATUS_LABEL[r.status as CaseStatus]}
+                    {r.matchedMember && <span> · vía integrante: {r.matchedMember}</span>}
+                  </div>
+                </button>
+              ))}
+              <p className="text-xs text-cream/40">
+                Si es esta persona, tocá su tarjeta para ir al caso existente y sumar una novedad ahí en vez de
+                duplicarlo. Si no es ninguno, seguí a "Siguiente" para cargarlo como caso nuevo.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       {currentStep === "basicos" && (
         <section>
@@ -786,7 +891,17 @@ export function NuevoCaso({ onCreated }: { onCreated: (caseNumber: string) => vo
           </button>
         )}
         {stepIndex < steps.length - 1 && (
-          <button type="button" onClick={() => setStepIndex(stepIndex + 1)} disabled={!canAdvance()} className={navBtnPrimary}>
+          <button
+            type="button"
+            onClick={() => {
+              if (currentStep === "buscar" && !fullName.trim() && dedupQuery.trim()) {
+                setFullName(dedupQuery.trim())
+              }
+              setStepIndex(stepIndex + 1)
+            }}
+            disabled={!canAdvance()}
+            className={navBtnPrimary}
+          >
             Siguiente
           </button>
         )}
