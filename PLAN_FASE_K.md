@@ -304,7 +304,7 @@ definitivas. `tsc` y `next build` limpios en ambas apps.
 
 ---
 
-## H) Post-Fase-K: dashboard, analítica ampliada, mapa de casos y reportes (NUEVO) 🚧 CONSTRUIDO Y VERIFICADO — pendiente de aplicar en producción (SSH caído de forma intermitente al momento de escribir esto, 22/09/2026 madrugada)
+## H) Post-Fase-K: dashboard, analítica ampliada, mapa de casos y reportes (NUEVO) ✅ ENTREGADO (22/09/2026)
 
 Pedido de Josecito del 21/09 a la noche, ya con toda Fase K en producción:
 corregir las tarjetas "próximamente" del dashboard, sumar más KPI/gráficos a
@@ -389,6 +389,35 @@ sesión, etc.) — las 25 pasaron. `tsc` y `next build` limpios en ambas
 apps, incluyendo el chunk nuevo de `/analitica` (237 kB, sube por
 leaflet+jspdf — esperable, es la única página que los usa).
 
+**Verificado end-to-end en producción**: API recompilada in-place
+(`npx tsc`) y reiniciada, los 5 endpoints nuevos devuelven 401 (registrados
+y con auth, no 404). Web: build standalone armado afuera del hosting (en el
+sandbox de Claude, mismo motivo que siempre — ver el incidente de `next
+build`/LVE en `DEPLOY.md`), extraído en una versión nueva de
+`hbuilds/versions/`, con el `.env` real copiado, y recién ahí se cambió el
+symlink `current` — `/login`, `/dashboard`, `/analitica` y `/casos` todos
+responden bien en producción, y el chunk de `/analitica` se sirve desde la
+versión nueva (hash de archivo verificado).
+
+**Incidente nuevo (22/09/2026) — SSH parecía caído, en realidad era el
+puerto equivocado**: durante buena parte de este bloque, todo intento de
+`ssh u859384027@45.152.46.191` (puerto 22, el default) daba `Connection
+timed out` — ni siquiera se completaba el handshake TCP (confirmado con
+`nc -zv` y `/dev/tcp`: sin SYN-ACK ni RST). Se probó con puertos de
+control (21 y 443 del mismo host conectaban al toque), lo que descartó un
+problema de red general. La pista correcta la dio el soporte de Hostinger:
+**este plan (hosting compartido, no VPS) expone SSH en el puerto `65002`,
+no en el 22** — el 22 está filtrado/cerrado a propósito en ese tipo de
+plan. Ya había un alias `hostinger-vidasolidaria` armado en
+`~/.ssh/config` del lado del dispositivo con el puerto y la clave
+correctos (`Port 65002`, `IdentityFile ~/.ssh/id_ed25519_hostinger`) — el
+problema fue que en este bloque se probó a mano con `ssh
+usuario@ip`, sin pasar por ese alias, y por eso pegaba contra el puerto
+filtrado. **Para la próxima vez**: usar siempre `ssh
+hostinger-vidasolidaria` (o agregar `-p 65002 -i
+~/.ssh/id_ed25519_hostinger` a mano si hace falta un comando suelto), no
+`ssh usuario@ip` a secas.
+
 ---
 
 ## Decisiones ya tomadas (de tus respuestas de hoy)
@@ -428,8 +457,5 @@ cerrado" a efectos del email) se resolvió al construir D: `CaseStatus.cerrado`
 **Con esto, Fase K queda completa** salvo los dos pendientes explícitos de
 Josecito (Resend y watchdog, ver el aviso al principio de este documento).
 
-7. **H (post-Fase-K: dashboard, analítica ampliada, mapa, reportes)** —
-   construido y verificado el 22/09/2026, **pendiente de aplicar en
-   producción** (bloqueado por una caída intermitente de SSH al servidor —
-   ver bloque H arriba; el sitio en sí sigue arriba y sano, solo el canal
-   de deploy está afectado).
+7. ~~**H (post-Fase-K: dashboard, analítica ampliada, mapa, reportes)**~~ —
+   **entregado y en producción el 22/09/2026.**
