@@ -628,3 +628,29 @@ tiene `~/.ssh/config` con `hostinger-vidasolidaria`, no es necesariamente
 que se perdió el acceso — primero probar si hay una máquina conectada
 por el puente de dispositivo (`get_device_info`) antes de asumir que
 hace falta pedirte la clave de nuevo.
+
+**Fix same-day post-deploy — slider de fotos con huecos (reportado por
+Josecito viendo la pantalla en vivo, 22/09/2026)**: el wrapper de cada
+tarjeta del slider tenía un ancho fijo de 120px (clase `w-30`, que no
+existe en Tailwind por defecto, más un `style` inline a 7.5rem) mientras
+`CaseAvatarFrame size="lg"` mide 144px de ancho real — y el desplazamiento
+del carrusel se calculaba a mano con `translateX` asumiendo pasos de
+120px. Ese desfasaje entre el tamaño real de la foto y el paso calculado
+era la causa de los huecos/superposiciones que se veían al avanzar
+automáticamente. Se resolvió reemplazando el cálculo manual por scroll
+nativo del navegador (`overflow-x-auto` + `scroll-snap-type: x
+mandatory`), que por construcción no puede desalinearse — y de paso
+resuelve gratis el arrastre táctil en celulares. Para mouse en
+escritorio se agregó arrastre con Pointer Events. Se distingue un tap de
+un arrastre real con un umbral de movimiento (>6px de desplazamiento =
+arrastre, no abre el caso) — así un swipe para volver a una foto que se
+pasó nunca dispara accidentalmente la apertura del perfil, y un tap
+limpio abre al instante sin que quede nada animando de fondo (la duda de
+Josecito sobre si el slider "sigue arrastrando" al tapear una foto: no,
+el guardado de la selección corta ahí mismo el intervalo de autoplay).
+También se agregó reanudación automática del autoplay a los 6s de
+inactividad, ya que la lógica anterior solo se reanudaba con
+`mouseleave` (no existe en táctil, así que en celular quedaba pausado
+para siempre tras el primer toque). Desplegado a producción y verificado
+por BUILD_ID coincidente entre el build local y lo servido en vivo.
+Commit en el repo real: `685e195`.
