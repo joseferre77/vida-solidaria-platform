@@ -18,6 +18,7 @@ import { casesRoutes } from "./modules/cases/cases.routes"
 import { notificationsRoutes } from "./modules/notifications/notifications.routes"
 import { publicRoutes } from "./modules/public/public.routes"
 import { analyticsRoutes } from "./modules/analytics/analytics.routes"
+import { startScheduledTicks } from "./lib/scheduled-ticks"
 
 async function main() {
   const app = Fastify({
@@ -124,6 +125,10 @@ async function main() {
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" })
   console.log(`✅ API escuchando en http://0.0.0.0:${env.PORT}`)
+
+  // Fase L: avisos programados (recordatorios + prompt semanal de
+  // asistencia) — ver lib/scheduled-ticks.ts.
+  startScheduledTicks()
 }
 
 main().catch((err) => {

@@ -93,8 +93,14 @@ function ProcessRow({ process, canWrite, onChanged }: { process: ProcessItem; ca
         <button
           onClick={async () => {
             if (!confirm(`¿Eliminar el proceso "${process.name}"? Las tareas quedan sin proceso asignado.`)) return
-            await deleteProcess(process.id)
-            onChanged()
+            try {
+              await deleteProcess(process.id)
+              onChanged()
+            } catch (e: any) {
+              // Antes esto fallaba en silencio (sin try/catch) — si el
+              // borrado vuelve a no andar, este alert va a decir por qué.
+              alert(e.message ?? "No se pudo eliminar el proceso")
+            }
           }}
           className="text-cream/30 hover:text-orange"
         >

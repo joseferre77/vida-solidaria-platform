@@ -10,14 +10,42 @@ export interface BasicUser {
 // (el equipo se arma de nuevo cada domingo) — por eso cada miembro trae su
 // weekStartDate, y una misma persona puede aparecer varias veces (una por
 // semana en la que participó).
+//
+// Fase L: Josecito confirmó que por ahora no hace falta una jerarquía con
+// subjefes — un equipo tiene UN coordinador (`coordinatorUserId`) y cada
+// integrante puede tener una o más funciones (relevo, extracción, etc.),
+// en vez de un segundo nivel de mando.
+export const TEAM_FUNCTIONS = [
+  "relevo",
+  "extraccion",
+  "despacho_comida",
+  "despacho_bebida",
+  "despacho_infusion",
+  "general",
+] as const
+
+export type TeamFunction = (typeof TEAM_FUNCTIONS)[number]
+
+export const TEAM_FUNCTION_LABEL: Record<TeamFunction, string> = {
+  relevo: "Relevo",
+  extraccion: "Extracción",
+  despacho_comida: "Despacho de comida",
+  despacho_bebida: "Despacho de bebida",
+  despacho_infusion: "Despacho de infusión",
+  general: "General",
+}
+
 export interface FieldTeamMemberItem extends BasicUser {
   weekStartDate: string
+  functions: TeamFunction[]
 }
 
 export interface FieldTeamItem {
   id: string
   name: string
   vehicleLabel: string | null
+  coordinatorUserId: string | null
+  coordinator: BasicUser | null
   members: FieldTeamMemberItem[]
 }
 
@@ -76,19 +104,21 @@ export interface CheckinItem {
 // ── Equipos ──
 export const listFieldTeams = () => apiFetch("/api/field-teams") as Promise<FieldTeamItem[]>
 
-export const createFieldTeam = (data: { name: string; vehicleLabel?: string }) =>
+export const createFieldTeam = (data: { name: string; vehicleLabel?: string; coordinatorUserId?: string | null }) =>
   apiFetch("/api/field-teams", { method: "POST", body: JSON.stringify(data) }) as Promise<FieldTeamItem>
 
-export const updateFieldTeam = (id: string, data: Partial<{ name: string; vehicleLabel: string }>) =>
-  apiFetch(`/api/field-teams/${id}`, { method: "PATCH", body: JSON.stringify(data) }) as Promise<FieldTeamItem>
+export const updateFieldTeam = (
+  id: string,
+  data: Partial<{ name: string; vehicleLabel: string; coordinatorUserId: string | null }>,
+) => apiFetch(`/api/field-teams/${id}`, { method: "PATCH", body: JSON.stringify(data) }) as Promise<FieldTeamItem>
 
 export const deleteFieldTeam = (id: string) => apiFetch(`/api/field-teams/${id}`, { method: "DELETE" })
 
-export const addFieldTeamMember = (teamId: string, userId: string, weekStartDate: string) =>
+export const addFieldTeamMember = (teamId: string, userId: string, weekStartDate: string, functions?: TeamFunction[]) =>
   apiFetch(`/api/field-teams/${teamId}/members`, {
     method: "POST",
-    body: JSON.stringify({ userId, weekStartDate }),
-  }) as Promise<BasicUser[]>
+    body: JSON.stringify({ userId, weekStartDate, functions }),
+  }) as Promise<FieldTeamMemberItem[]>
 
 export const removeFieldTeamMember = (teamId: string, userId: string, weekStartDate: string) =>
   apiFetch(`/api/field-teams/${teamId}/members/${userId}?weekStartDate=${encodeURIComponent(weekStartDate)}`, {

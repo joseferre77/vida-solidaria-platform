@@ -197,7 +197,7 @@ export default function ProjectPage() {
 
       {error && <p className="mb-4 rounded-xl border border-orange/40 bg-orange/10 p-3 text-sm text-orange">{error}</p>}
 
-      {activeTab === "general" && <VistaGeneral project={project} />}
+      {activeTab === "general" && <VistaGeneral project={project} users={users} canAdmin={access.canAdmin} onChanged={onChanged} />}
       {activeTab === "lista" && <ListaTareas tasks={allTasks} onOpenTask={setOpenTaskId} />}
       {activeTab === "kanban" && (
         <Kanban project={project} processes={processes} canWrite={access.canWrite} onOpenTask={setOpenTaskId} onChanged={onChanged} />

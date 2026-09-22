@@ -43,6 +43,18 @@ model User {
   // Motivo/mensaje que la persona escribió en el formulario público de alta
   // (vidasolidariamdp.com). Null para usuarios creados a mano desde gestión.
   volunteerMessage String? @map("volunteer_message")
+  // Fase L: alta de usuario más completa — pedido de Josecito al notar que
+  // los 14 coordinadores reales todavía no estaban cargados en el sistema.
+  // Todo opcional (se puede seguir dando de alta solo con nombre+email+rol
+  // como hasta ahora, y completar el resto después).
+  birthDate      DateTime? @map("birth_date")
+  sex            String?
+  address        String?
+  phoneAlt       String?   @map("phone_alt")
+  skills         String? // texto libre — habilidades/oficios
+  cvUrl          String?   @map("cv_url") // sube por POST /uploads, mismo mecanismo que avatarUrl
+  availableDays  String[]  @default([]) @map("available_days") // "lun".."dom"
+  availableHours String?   @map("available_hours") // texto libre — ej. "mañanas", "9 a 13hs"
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
@@ -1103,12 +1115,30 @@ model FieldTeam {
   id           String  @id @default(uuid())
   name         String
   vehicleLabel String? @map("vehicle_label")
+  // Fase L: a quién reportan todos los demás miembros del equipo —
+  // jerarquía plana por equipo (decisión de diseño confirmada por Josecito
+  // 23/09/2026: no hacen falta sub-jefes por ahora). Campo suelto (sin
+  // relación Prisma) para no depender de que el coordinador sea miembro
+  // formal del equipo esa semana puntual.
+  coordinatorUserId String? @map("coordinator_user_id")
 
   members         FieldTeamMember[]
   zoneAssignments ZoneAssignment[]
   checkins        Checkin[]
 
   @@map("field_teams")
+}
+
+/// Fase L: "sombreros" que puede tener un integrante dentro de un equipo,
+/// más allá de si es o no el coordinador (eso vive en FieldTeam.coordinatorUserId).
+/// Un mismo miembro puede tener varios (ej. despacho_comida + despacho_infusion).
+enum TeamFunction {
+  relevo
+  extraccion
+  despacho_comida
+  despacho_bebida
+  despacho_infusion
+  general
 }
 
 // Fase K bloque B: los equipos se arman de nuevo cada domingo a partir de
@@ -1118,10 +1148,12 @@ model FieldTeam {
 // producción esta tabla está vacía (se confirmó antes de migrar), así que
 // no hace falta backfill: se puede cambiar la forma de la clave directo.
 model FieldTeamMember {
-  id            String   @id @default(uuid())
-  teamId        String   @map("team_id")
-  userId        String   @map("user_id")
-  weekStartDate DateTime @map("week_start_date")
+  id            String         @id @default(uuid())
+  teamId        String         @map("team_id")
+  userId        String         @map("user_id")
+  weekStartDate DateTime       @map("week_start_date")
+  // Fase L: función(es) de este integrante en el equipo, esa semana.
+  functions     TeamFunction[] @default([])
 
   team FieldTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
 

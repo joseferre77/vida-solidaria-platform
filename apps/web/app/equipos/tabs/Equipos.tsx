@@ -10,7 +10,10 @@ import {
   listFieldTeams,
   removeFieldTeamMember,
   updateFieldTeam,
+  TEAM_FUNCTIONS,
+  TEAM_FUNCTION_LABEL,
   type FieldTeamItem,
+  type TeamFunction,
 } from "../../../lib/field-ops"
 
 /**
@@ -92,10 +95,36 @@ export function Equipos() {
                 ✕
               </button>
             </div>
+
+            {/* Fase L: coordinador del equipo — jerarquía plana confirmada
+                con Josecito, sin subjefes, un coordinador por equipo. */}
+            <label className="mt-2 flex items-center gap-2 text-xs text-cream/60">
+              <span>Coordinador:</span>
+              <select
+                value={t.coordinatorUserId ?? ""}
+                onChange={(e) => {
+                  updateFieldTeam(t.id, { coordinatorUserId: e.target.value || null })
+                    .then(refresh)
+                    .catch((err) => setError(err.message))
+                }}
+                className="rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
+              >
+                <option value="" className="bg-purple-deep">
+                  Sin asignar
+                </option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id} className="bg-purple-deep">
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
               {membersForWeek(t).map((m) => (
-                <span key={m.id} className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-cream/80">
+                <span key={m.id} className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-cream/80" title={m.functions.map((f) => TEAM_FUNCTION_LABEL[f]).join(", ")}>
                   {m.name}
+                  {m.functions.length > 0 && <span className="text-cream/40"> · {m.functions.map((f) => TEAM_FUNCTION_LABEL[f]).join(", ")}</span>}
                 </span>
               ))}
               {membersForWeek(t).length === 0 && (
@@ -112,6 +141,7 @@ export function Equipos() {
 
       {showForm && (
         <NewTeamModal
+          allUsers={users}
           onClose={() => setShowForm(false)}
           onCreated={() => {
             setShowForm(false)
@@ -136,9 +166,18 @@ export function Equipos() {
   )
 }
 
-function NewTeamModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function NewTeamModal({
+  allUsers,
+  onClose,
+  onCreated,
+}: {
+  allUsers: BasicUser[]
+  onClose: () => void
+  onCreated: () => void
+}) {
   const [name, setName] = useState("")
   const [vehicleLabel, setVehicleLabel] = useState("")
+  const [coordinatorUserId, setCoordinatorUserId] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -151,7 +190,11 @@ function NewTeamModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           setSaving(true)
           setError(null)
           try {
-            await createFieldTeam({ name: name.trim(), vehicleLabel: vehicleLabel.trim() || undefined })
+            await createFieldTeam({
+              name: name.trim(),
+              vehicleLabel: vehicleLabel.trim() || undefined,
+              coordinatorUserId: coordinatorUserId || null,
+            })
             onCreated()
           } catch (err: any) {
             setError(err.message ?? "No se pudo crear el equipo")
@@ -174,7 +217,7 @@ function NewTeamModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           />
         </label>
 
-        <label className="mb-4 block text-sm">
+        <label className="mb-3 block text-sm">
           <span className="mb-1 block text-cream/70">Vehículo (opcional)</span>
           <input
             value={vehicleLabel}
@@ -182,6 +225,24 @@ function NewTeamModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
             placeholder="p. ej. Camioneta blanca AB123CD"
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
           />
+        </label>
+
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block text-cream/70">Coordinador (opcional)</span>
+          <select
+            value={coordinatorUserId}
+            onChange={(e) => setCoordinatorUserId(e.target.value)}
+            className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+          >
+            <option value="" className="bg-purple-deep">
+              Sin asignar
+            </option>
+            {allUsers.map((u) => (
+              <option key={u.id} value={u.id} className="bg-purple-deep">
+                {u.name}
+              </option>
+            ))}
+          </select>
         </label>
 
         {error && <p className="mb-3 text-sm text-orange">{error}</p>}
@@ -217,26 +278,53 @@ function MembersModal({
   const memberIds = new Set(members.map((m) => m.id))
   const available = allUsers.filter((u) => !memberIds.has(u.id))
 
+  function toggleFunction(m: FieldTeamItem["members"][number], fn: TeamFunction) {
+    const nextFunctions = m.functions.includes(fn) ? m.functions.filter((f) => f !== fn) : [...m.functions, fn]
+    // Optimista: refleja el toggle ya mismo y confirma contra el server —
+    // si falla, se revierte y se muestra el error.
+    setMembers((prev) => prev.map((x) => (x.id === m.id ? { ...x, functions: nextFunctions } : x)))
+    addFieldTeamMember(team.id, m.id, weekStartDate, nextFunctions).catch((e) => {
+      onError(e.message)
+      setMembers((prev) => prev.map((x) => (x.id === m.id ? { ...x, functions: m.functions } : x)))
+    })
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-white/15 bg-purple-deep p-6">
+      <div className="w-full max-w-md rounded-2xl border border-white/15 bg-purple-deep p-6">
         <h2 className="mb-1 font-display text-lg font-bold text-yellow">Integrantes de {team.name}</h2>
         <p className="mb-4 text-xs text-cream/50">Semana del {formatDate(weekStartDate)}</p>
 
-        <div className="mb-4 space-y-1.5">
+        <div className="mb-4 space-y-2">
           {members.map((m) => (
-            <div key={m.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-1.5 text-sm text-cream">
-              <span>{m.name}</span>
-              <button
-                onClick={() => {
-                  removeFieldTeamMember(team.id, m.id, weekStartDate)
-                    .then(() => setMembers((prev) => prev.filter((x) => x.id !== m.id)))
-                    .catch((e) => onError(e.message))
-                }}
-                className="text-cream/30 hover:text-orange"
-              >
-                ✕
-              </button>
+            <div key={m.id} className="rounded-lg bg-white/5 px-3 py-2 text-sm text-cream">
+              <div className="flex items-center justify-between">
+                <span>{m.name}</span>
+                <button
+                  onClick={() => {
+                    removeFieldTeamMember(team.id, m.id, weekStartDate)
+                      .then(() => setMembers((prev) => prev.filter((x) => x.id !== m.id)))
+                      .catch((e) => onError(e.message))
+                  }}
+                  className="text-cream/30 hover:text-orange"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {TEAM_FUNCTIONS.map((fn) => (
+                  <button
+                    key={fn}
+                    type="button"
+                    onClick={() => toggleFunction(m, fn)}
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
+                      m.functions.includes(fn) ? "bg-yellow text-purple-deep" : "bg-white/10 text-cream/50 hover:bg-white/20"
+                    }`}
+                  >
+                    {TEAM_FUNCTION_LABEL[fn]}
+                  </button>
+                ))}
+              </div>
             </div>
           ))}
           {members.length === 0 && <p className="text-xs text-cream/40">Sin integrantes confirmados esta semana</p>}

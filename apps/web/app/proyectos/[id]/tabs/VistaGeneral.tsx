@@ -1,10 +1,31 @@
 "use client"
 
+import { useState } from "react"
 import { PRIORITY_COLOR, PRIORITY_LABEL, STATUS_COLOR, STATUS_LABEL, formatDate, formatMinutes, formatMoney, initials } from "../../../../lib/format"
-import type { ProjectDetail } from "../../../../lib/projects"
+import { addProjectMember, removeProjectMember, type BasicUser, type ProjectDetail, type ProjectRole } from "../../../../lib/projects"
 
-/** Fase D — pestaña "Vista General": metadatos + totales que ya trae GET /projects/:id. */
-export function VistaGeneral({ project }: { project: ProjectDetail }) {
+const ROLE_LABEL: Record<ProjectRole, string> = { creador: "Creador", admin: "Admin", editor: "Editor", visor: "Solo lectura" }
+
+/**
+ * Fase L: antes no había NINGUNA forma de agregar/quitar miembros de un
+ * proyecto desde la UI — `POST/DELETE /projects/:id/members` existían en
+ * la API desde antes pero nunca se llamaban desde ningún lado del
+ * frontend (bug que reportó Josecito: "desde el caso agrego integrantes...
+ * al entrar al proyecto no se reflejan" — no es que no se reflejaran, es
+ * que nunca se llegaban a crear). Se agrega acá, en Vista General, que es
+ * donde ya se mostraba la lista de miembros.
+ */
+export function VistaGeneral({
+  project,
+  users,
+  canAdmin,
+  onChanged,
+}: {
+  project: ProjectDetail
+  users: BasicUser[]
+  canAdmin: boolean
+  onChanged: () => void
+}) {
   const allTasks = project.boards.flatMap((b) => b.columns.flatMap((c) => c.tasks))
   const doneColumn = project.boards.flatMap((b) => b.columns).find((c) => c.name === "Hecho")
   const doneCount = doneColumn?.tasks.length ?? 0
@@ -61,16 +82,35 @@ export function VistaGeneral({ project }: { project: ProjectDetail }) {
           <ul className="space-y-2">
             {project.members.map((m) => (
               <li key={m.userId} className="flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-yellow/80 text-[10px] font-bold text-purple-deep">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-yellow/80 text-[10px] font-bold text-purple-deep">
                   {initials(m.user.name)}
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-cream">{m.user.name}</p>
-                  <p className="text-[11px] capitalize text-cream/50">{m.projectRole}</p>
+                  <p className="text-[11px] text-cream/50">{ROLE_LABEL[m.projectRole]}</p>
                 </div>
+                {canAdmin && m.projectRole !== "creador" && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`¿Quitar a ${m.user.name} del proyecto?`)) return
+                      try {
+                        await removeProjectMember(project.id, m.userId)
+                        onChanged()
+                      } catch (e: any) {
+                        alert(e.message ?? "No se pudo quitar al integrante")
+                      }
+                    }}
+                    className="shrink-0 text-cream/30 hover:text-orange"
+                    title="Quitar del proyecto"
+                  >
+                    ✕
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+
+          {canAdmin && <AddMemberForm projectId={project.id} users={users} existingUserIds={project.members.map((m) => m.userId)} onChanged={onChanged} />}
         </div>
 
         <div className="rounded-2xl border border-white/15 bg-white/5 p-5">
@@ -105,5 +145,76 @@ function Field({ label, value }: { label: string; value: string }) {
       <p className="text-[11px] uppercase tracking-wide text-cream/40">{label}</p>
       <p className="text-cream">{value}</p>
     </div>
+  )
+}
+
+function AddMemberForm({
+  projectId,
+  users,
+  existingUserIds,
+  onChanged,
+}: {
+  projectId: string
+  users: BasicUser[]
+  existingUserIds: string[]
+  onChanged: () => void
+}) {
+  const [userId, setUserId] = useState("")
+  const [role, setRole] = useState<ProjectRole>("editor")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const available = users.filter((u) => !existingUserIds.includes(u.id))
+
+  return (
+    <form
+      className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/10 pt-3"
+      onSubmit={async (e) => {
+        e.preventDefault()
+        if (!userId) return
+        setSaving(true)
+        setError(null)
+        try {
+          await addProjectMember(projectId, userId, role)
+          setUserId("")
+          onChanged()
+        } catch (err: any) {
+          setError(err.message ?? "No se pudo agregar el integrante")
+        } finally {
+          setSaving(false)
+        }
+      }}
+    >
+      <select
+        value={userId}
+        onChange={(e) => setUserId(e.target.value)}
+        className="min-w-0 flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+      >
+        <option value="">+ Agregar integrante...</option>
+        {available.map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.name}
+          </option>
+        ))}
+      </select>
+      <select
+        value={role}
+        onChange={(e) => setRole(e.target.value as ProjectRole)}
+        className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
+      >
+        <option value="editor">Editor</option>
+        <option value="visor">Solo lectura</option>
+        <option value="admin">Admin</option>
+      </select>
+      <button
+        type="submit"
+        disabled={saving || !userId}
+        className="rounded-lg bg-yellow px-3 py-1.5 text-xs font-semibold text-purple-deep disabled:opacity-50"
+      >
+        Agregar
+      </button>
+      {error && <p className="w-full text-xs text-orange">{error}</p>}
+      {available.length === 0 && <p className="w-full text-xs text-cream/40">Todos los usuarios activos ya son miembros.</p>}
+    </form>
   )
 }

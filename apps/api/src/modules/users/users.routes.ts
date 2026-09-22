@@ -29,19 +29,38 @@ function generateSecurePassword(length = 14) {
 
 const roleSlugSchema = z.enum(GLOBAL_ROLES)
 
-const createUserSchema = z.object({
-  name: z.string().min(2, "El nombre es obligatorio"),
-  email: z.string().email("Email inválido"),
-  phone: z.string().trim().optional(),
-  roleSlugs: z.array(roleSlugSchema).min(1, "Elegí al menos un rol"),
-  password: z.string().min(8).optional(), // si no viene, se genera una automática
+// Fase L: perfil extendido — pedido de Josecito al notar que los 14
+// coordinadores reales no estaban cargados. Todo opcional a propósito: el
+// alta rápida (solo nombre+email+rol) sigue andando igual que siempre.
+const profileFieldsSchema = z.object({
+  birthDate: z.string().datetime().nullable().optional(),
+  sex: z.string().trim().max(40).nullable().optional(),
+  address: z.string().trim().max(300).nullable().optional(),
+  phoneAlt: z.string().trim().max(40).nullable().optional(),
+  skills: z.string().trim().max(1000).nullable().optional(),
+  cvUrl: z.string().url().nullable().optional(),
+  avatarUrl: z.string().url().nullable().optional(),
+  availableDays: z.array(z.enum(["lun", "mar", "mie", "jue", "vie", "sab", "dom"])).optional(),
+  availableHours: z.string().trim().max(200).nullable().optional(),
 })
 
-const updateUserSchema = z.object({
-  name: z.string().min(2).optional(),
-  phone: z.string().trim().nullable().optional(),
-  status: z.enum(["active", "suspended"]).optional(),
-})
+const createUserSchema = z
+  .object({
+    name: z.string().min(2, "El nombre es obligatorio"),
+    email: z.string().email("Email inválido"),
+    phone: z.string().trim().optional(),
+    roleSlugs: z.array(roleSlugSchema).min(1, "Elegí al menos un rol"),
+    password: z.string().min(8).optional(), // si no viene, se genera una automática
+  })
+  .merge(profileFieldsSchema)
+
+const updateUserSchema = z
+  .object({
+    name: z.string().min(2).optional(),
+    phone: z.string().trim().nullable().optional(),
+    status: z.enum(["active", "suspended"]).optional(),
+  })
+  .merge(profileFieldsSchema)
 
 const updateRolesSchema = z.object({
   roleSlugs: z.array(roleSlugSchema).min(1, "Un usuario necesita al menos un rol"),
@@ -60,6 +79,14 @@ function serializeUser(user: {
   status: string
   volunteerMessage: string | null
   createdAt: Date
+  birthDate: Date | null
+  sex: string | null
+  address: string | null
+  phoneAlt: string | null
+  skills: string | null
+  cvUrl: string | null
+  availableDays: string[]
+  availableHours: string | null
   roles: { role: { slug: string; label: string; rank: number } }[]
 }) {
   return {
@@ -71,6 +98,14 @@ function serializeUser(user: {
     status: user.status,
     volunteerMessage: user.volunteerMessage,
     createdAt: user.createdAt,
+    birthDate: user.birthDate,
+    sex: user.sex,
+    address: user.address,
+    phoneAlt: user.phoneAlt,
+    skills: user.skills,
+    cvUrl: user.cvUrl,
+    availableDays: user.availableDays,
+    availableHours: user.availableHours,
     roles: user.roles
       .map((ur) => ur.role)
       .sort((a, b) => a.rank - b.rank)
@@ -143,6 +178,15 @@ export async function usersRoutes(app: FastifyInstance) {
         passwordHash,
         status: "active",
         roles: { create: roles.map((r) => ({ roleId: r.id })) },
+        birthDate: body.birthDate ? new Date(body.birthDate) : null,
+        sex: body.sex || null,
+        address: body.address || null,
+        phoneAlt: body.phoneAlt || null,
+        skills: body.skills || null,
+        cvUrl: body.cvUrl || null,
+        avatarUrl: body.avatarUrl || null,
+        availableDays: body.availableDays ?? [],
+        availableHours: body.availableHours || null,
       },
       include: USER_WITH_ROLES_INCLUDE,
     })
@@ -165,9 +209,13 @@ export async function usersRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "No podés suspender tu propio usuario" })
     }
 
+    const { birthDate, ...rest } = body
     const user = await prisma.user.update({
       where: { id },
-      data: body,
+      data: {
+        ...rest,
+        birthDate: birthDate === undefined ? undefined : birthDate ? new Date(birthDate) : null,
+      },
       include: USER_WITH_ROLES_INCLUDE,
     })
     return serializeUser(user)

@@ -3,12 +3,17 @@
 import { useEffect, useState } from "react"
 import {
   approveUser,
+  AVAILABLE_DAYS,
+  AVAILABLE_DAY_LABEL,
   createUser,
   listRoles,
   listUsers,
   rejectUser,
   updateUser,
   updateUserRoles,
+  uploadProfileFile,
+  type AvailableDay,
+  type ProfileFields,
   type RoleItem,
   type UserItem,
 } from "../../../lib/users"
@@ -33,6 +38,7 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editingRolesFor, setEditingRolesFor] = useState<UserItem | null>(null)
+  const [editingProfileFor, setEditingProfileFor] = useState<UserItem | null>(null)
   const [lastGeneratedPassword, setLastGeneratedPassword] = useState<{ email: string; password: string } | null>(
     null,
   )
@@ -180,6 +186,10 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">
+                  <button onClick={() => setEditingProfileFor(u)} className="text-xs text-yellow hover:underline">
+                    Editar perfil
+                  </button>
+                  <span className="mx-1.5 text-cream/20">·</span>
                   <button onClick={() => setEditingRolesFor(u)} className="text-xs text-yellow hover:underline">
                     Editar roles
                   </button>
@@ -216,6 +226,18 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
           onClose={() => setEditingRolesFor(null)}
           onSaved={() => {
             setEditingRolesFor(null)
+            refresh()
+          }}
+          onError={setError}
+        />
+      )}
+
+      {editingProfileFor && (
+        <EditProfileModal
+          user={editingProfileFor}
+          onClose={() => setEditingProfileFor(null)}
+          onSaved={() => {
+            setEditingProfileFor(null)
             refresh()
           }}
           onError={setError}
@@ -360,6 +382,178 @@ function PendingApprovalCard({
   )
 }
 
+/**
+ * Fase L: bloque de campos de perfil extendido, compartido entre el alta
+ * (NewUserModal) y la edición (EditProfileModal) — Josecito pidió que el
+ * alta de usuarios sea "mas completo, con imagen de perfil, datos de
+ * domicilio, telefonos, emails, edad, sexo, habilidades, cv adjunto, dias
+ * disponibles, horarios disponibles". Todo opcional: no bloquea el alta
+ * rápida de siempre.
+ */
+function ProfileFieldsEditor({
+  value,
+  onChange,
+}: {
+  value: ProfileFields
+  onChange: (next: ProfileFields) => void
+}) {
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [uploadingCv, setUploadingCv] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const days = new Set(value.availableDays ?? [])
+  function toggleDay(d: AvailableDay) {
+    const next = new Set(days)
+    if (next.has(d)) next.delete(d)
+    else next.add(d)
+    onChange({ ...value, availableDays: Array.from(next) })
+  }
+
+  return (
+    <div className="mb-4 space-y-3 border-t border-white/10 pt-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-cream/40">Perfil (opcional)</p>
+
+      <div className="flex items-center gap-3">
+        {value.avatarUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={value.avatarUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
+        )}
+        <label className="flex-1 text-sm">
+          <span className="mb-1 block text-cream/70">Foto de perfil</span>
+          <input
+            type="file"
+            accept="image/*"
+            disabled={uploadingAvatar}
+            onChange={async (e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              setUploadingAvatar(true)
+              setUploadError(null)
+              try {
+                const { fileUrl } = await uploadProfileFile(file)
+                onChange({ ...value, avatarUrl: fileUrl })
+              } catch (err: any) {
+                setUploadError(err.message ?? "No se pudo subir la foto")
+              } finally {
+                setUploadingAvatar(false)
+              }
+            }}
+            className="w-full text-xs text-cream/70 file:mr-2 file:rounded-lg file:border-0 file:bg-white/10 file:px-2 file:py-1 file:text-cream"
+          />
+        </label>
+      </div>
+
+      <label className="block text-sm">
+        <span className="mb-1 block text-cream/70">Domicilio</span>
+        <input
+          value={value.address ?? ""}
+          onChange={(e) => onChange({ ...value, address: e.target.value })}
+          className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+        />
+      </label>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block text-sm">
+          <span className="mb-1 block text-cream/70">Teléfono alternativo</span>
+          <input
+            value={value.phoneAlt ?? ""}
+            onChange={(e) => onChange({ ...value, phoneAlt: e.target.value })}
+            className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-cream/70">Fecha de nacimiento</span>
+          <input
+            type="date"
+            value={value.birthDate ? value.birthDate.slice(0, 10) : ""}
+            onChange={(e) => onChange({ ...value, birthDate: e.target.value ? `${e.target.value}T00:00:00.000Z` : null })}
+            className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+          />
+        </label>
+      </div>
+
+      <label className="block text-sm">
+        <span className="mb-1 block text-cream/70">Sexo</span>
+        <input
+          value={value.sex ?? ""}
+          onChange={(e) => onChange({ ...value, sex: e.target.value })}
+          className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+        />
+      </label>
+
+      <label className="block text-sm">
+        <span className="mb-1 block text-cream/70">Habilidades</span>
+        <textarea
+          value={value.skills ?? ""}
+          onChange={(e) => onChange({ ...value, skills: e.target.value })}
+          rows={2}
+          className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+        />
+      </label>
+
+      <label className="block text-sm">
+        <span className="mb-1 block text-cream/70">CV adjunto</span>
+        <input
+          type="file"
+          accept=".pdf,.doc,.docx"
+          disabled={uploadingCv}
+          onChange={async (e) => {
+            const file = e.target.files?.[0]
+            if (!file) return
+            setUploadingCv(true)
+            setUploadError(null)
+            try {
+              const { fileUrl } = await uploadProfileFile(file)
+              onChange({ ...value, cvUrl: fileUrl })
+            } catch (err: any) {
+              setUploadError(err.message ?? "No se pudo subir el CV")
+            } finally {
+              setUploadingCv(false)
+            }
+          }}
+          className="w-full text-xs text-cream/70 file:mr-2 file:rounded-lg file:border-0 file:bg-white/10 file:px-2 file:py-1 file:text-cream"
+        />
+        {value.cvUrl && (
+          <a href={value.cvUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs text-yellow hover:underline">
+            Ver CV cargado
+          </a>
+        )}
+      </label>
+
+      <div>
+        <span className="mb-1 block text-sm text-cream/70">Días disponibles</span>
+        <div className="flex flex-wrap gap-1.5">
+          {AVAILABLE_DAYS.map((d) => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => toggleDay(d)}
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                days.has(d) ? "bg-yellow text-purple-deep" : "bg-white/10 text-cream/60 hover:bg-white/20"
+              }`}
+            >
+              {AVAILABLE_DAY_LABEL[d]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <label className="block text-sm">
+        <span className="mb-1 block text-cream/70">Horarios disponibles</span>
+        <input
+          value={value.availableHours ?? ""}
+          onChange={(e) => onChange({ ...value, availableHours: e.target.value })}
+          placeholder="p. ej. Sábados y domingos por la mañana"
+          className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+        />
+      </label>
+
+      {(uploadingAvatar || uploadingCv) && <p className="text-xs text-cream/50">Subiendo archivo...</p>}
+      {uploadError && <p className="text-xs text-orange">{uploadError}</p>}
+    </div>
+  )
+}
+
 function NewUserModal({
   roles,
   onClose,
@@ -374,6 +568,7 @@ function NewUserModal({
   const [phone, setPhone] = useState("")
   const [password, setPassword] = useState("")
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set())
+  const [profile, setProfile] = useState<ProfileFields>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -401,6 +596,7 @@ function NewUserModal({
               phone: phone.trim() || undefined,
               roleSlugs: Array.from(selectedRoles),
               password: password.trim() || undefined,
+              ...profile,
             })
             onCreated(user, generatedPassword)
           } catch (err: any) {
@@ -409,7 +605,7 @@ function NewUserModal({
             setSaving(false)
           }
         }}
-        className="w-full max-w-md rounded-2xl border border-white/15 bg-purple-deep p-6"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/15 bg-purple-deep p-6"
       >
         <h2 className="mb-4 font-display text-lg font-bold text-yellow">Nuevo usuario</h2>
 
@@ -459,6 +655,8 @@ function NewUserModal({
           <RoleCheckboxList roles={roles} selected={selectedRoles} onToggle={toggleRole} />
         </div>
 
+        <ProfileFieldsEditor value={profile} onChange={setProfile} />
+
         {error && <p className="mb-3 text-sm text-orange">{error}</p>}
 
         <div className="flex justify-end gap-3">
@@ -471,6 +669,95 @@ function NewUserModal({
             className="rounded-xl bg-yellow px-4 py-2 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
           >
             {saving ? "Creando..." : "Crear usuario"}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function EditProfileModal({
+  user,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  user: UserItem
+  onClose: () => void
+  onSaved: () => void
+  onError: (e: string) => void
+}) {
+  const [name, setName] = useState(user.name)
+  const [phone, setPhone] = useState(user.phone ?? "")
+  const [profile, setProfile] = useState<ProfileFields>({
+    birthDate: user.birthDate,
+    sex: user.sex,
+    address: user.address,
+    phoneAlt: user.phoneAlt,
+    skills: user.skills,
+    cvUrl: user.cvUrl,
+    avatarUrl: user.avatarUrl,
+    availableDays: user.availableDays,
+    availableHours: user.availableHours,
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault()
+          if (!name.trim()) return
+          setSaving(true)
+          setError(null)
+          try {
+            await updateUser(user.id, { name: name.trim(), phone: phone.trim() || null, ...profile })
+            onSaved()
+          } catch (err: any) {
+            setError(err.message ?? "No se pudo guardar el perfil")
+          } finally {
+            setSaving(false)
+          }
+        }}
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/15 bg-purple-deep p-6"
+      >
+        <h2 className="mb-1 font-display text-lg font-bold text-yellow">Editar perfil</h2>
+        <p className="mb-4 text-xs text-cream/50">{user.email}</p>
+
+        <label className="mb-3 block text-sm">
+          <span className="mb-1 block text-cream/70">Nombre y apellido *</span>
+          <input
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+          />
+        </label>
+
+        <label className="mb-3 block text-sm">
+          <span className="mb-1 block text-cream/70">Teléfono</span>
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
+          />
+        </label>
+
+        <ProfileFieldsEditor value={profile} onChange={setProfile} />
+
+        {error && <p className="mb-3 text-sm text-orange">{error}</p>}
+
+        <div className="flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="rounded-xl border border-white/20 px-4 py-2 text-sm hover:bg-white/5">
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-xl bg-yellow px-4 py-2 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+          >
+            {saving ? "Guardando..." : "Guardar"}
           </button>
         </div>
       </form>

@@ -40,7 +40,13 @@ import { requireAuth, requirePermission } from "../../middleware/auth.middleware
 const teamSchema = z.object({
   name: z.string().min(2, "El nombre es obligatorio"),
   vehicleLabel: z.string().trim().optional(),
+  // Fase L: a quién reportan los demás miembros del equipo (jerarquía
+  // plana — un coordinador por equipo, sin sub-jefes, confirmado con
+  // Josecito 23/09/2026).
+  coordinatorUserId: z.string().uuid().nullable().optional(),
 })
+
+const TEAM_FUNCTIONS = ["relevo", "extraccion", "despacho_comida", "despacho_bebida", "despacho_infusion", "general"] as const
 
 const zoneSchema = z.object({
   name: z.string().min(2, "El nombre es obligatorio"),
@@ -56,6 +62,7 @@ const zoneAssignmentSchema = z.object({
 const teamMemberSchema = z.object({
   userId: z.string().uuid(),
   weekStartDate: z.string().min(8),
+  functions: z.array(z.enum(TEAM_FUNCTIONS)).optional(),
 })
 
 const availabilitySchema = z.object({
@@ -109,15 +116,20 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
       include: { members: true },
       orderBy: { name: "asc" },
     })
-    const users = await userMapFor(teams.flatMap((t) => t.members.map((m) => m.userId)))
+    const users = await userMapFor([
+      ...teams.flatMap((t) => t.members.map((m) => m.userId)),
+      ...teams.map((t) => t.coordinatorUserId),
+    ])
     return teams.map((t) => ({
       id: t.id,
       name: t.name,
       vehicleLabel: t.vehicleLabel,
+      coordinatorUserId: t.coordinatorUserId,
+      coordinator: t.coordinatorUserId ? users.get(t.coordinatorUserId) ?? null : null,
       members: t.members
         .map((m) => {
           const user = users.get(m.userId)
-          return user ? { ...user, weekStartDate: m.weekStartDate } : null
+          return user ? { ...user, weekStartDate: m.weekStartDate, functions: m.functions } : null
         })
         .filter(Boolean),
     }))
@@ -126,9 +138,9 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
   app.post("/field-teams", { preHandler: [requireAuth, requirePermission("field_ops.write")] }, async (request, reply) => {
     const body = teamSchema.parse(request.body)
     const team = await prisma.fieldTeam.create({
-      data: { name: body.name, vehicleLabel: body.vehicleLabel || null },
+      data: { name: body.name, vehicleLabel: body.vehicleLabel || null, coordinatorUserId: body.coordinatorUserId || null },
     })
-    return reply.code(201).send({ ...team, members: [] })
+    return reply.code(201).send({ ...team, coordinator: null, members: [] })
   })
 
   app.patch(
@@ -139,7 +151,11 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
       const body = teamSchema.partial().parse(request.body)
       return prisma.fieldTeam.update({
         where: { id },
-        data: { ...body, vehicleLabel: body.vehicleLabel === undefined ? undefined : body.vehicleLabel || null },
+        data: {
+          ...body,
+          vehicleLabel: body.vehicleLabel === undefined ? undefined : body.vehicleLabel || null,
+          coordinatorUserId: body.coordinatorUserId === undefined ? undefined : body.coordinatorUserId || null,
+        },
       })
     },
   )
@@ -159,18 +175,25 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requirePermission("field_ops.write")] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
-      const { userId, weekStartDate } = teamMemberSchema.parse(request.body)
+      const { userId, weekStartDate, functions } = teamMemberSchema.parse(request.body)
       const weekStart = new Date(weekStartDate)
       await prisma.fieldTeamMember.upsert({
         where: { teamId_userId_weekStartDate: { teamId: id, userId, weekStartDate: weekStart } },
-        update: {},
-        create: { teamId: id, userId, weekStartDate: weekStart },
+        update: { functions: functions ?? undefined },
+        create: { teamId: id, userId, weekStartDate: weekStart, functions: functions ?? [] },
       })
       // Devuelve solo los integrantes de ESA semana (no todo el historial
       // del equipo) — es lo que necesita la pantalla de armado semanal.
       const members = await prisma.fieldTeamMember.findMany({ where: { teamId: id, weekStartDate: weekStart } })
       const users = await userMapFor(members.map((m) => m.userId))
-      return reply.code(201).send(members.map((m) => users.get(m.userId)).filter(Boolean))
+      return reply.code(201).send(
+        members
+          .map((m) => {
+            const user = users.get(m.userId)
+            return user ? { ...user, functions: m.functions } : null
+          })
+          .filter(Boolean),
+      )
     },
   )
 
