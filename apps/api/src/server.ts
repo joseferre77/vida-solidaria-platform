@@ -19,6 +19,7 @@ import { notificationsRoutes } from "./modules/notifications/notifications.route
 import { publicRoutes } from "./modules/public/public.routes"
 import { analyticsRoutes } from "./modules/analytics/analytics.routes"
 import { startScheduledTicks } from "./lib/scheduled-ticks"
+import { ensurePendingMigrations } from "./lib/ensure-migrations"
 
 async function main() {
   const app = Fastify({
@@ -122,6 +123,12 @@ async function main() {
 
   // TODO (Módulo 4+): registrar acá finance.routes (donaciones/compras/rendición).
   // logistics/field-ops/cases todavía sin Socket.IO (ver notas en esos módulos).
+
+  // Ver ensure-migrations.ts: se aplican ACÁ (con la conexión de este
+  // proceso) en vez de por `prisma migrate deploy` vía SSH — antes de
+  // aceptar tráfico, para que ninguna request pegue contra columnas que
+  // todavía no existen.
+  await ensurePendingMigrations()
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" })
   console.log(`✅ API escuchando en http://0.0.0.0:${env.PORT}`)
