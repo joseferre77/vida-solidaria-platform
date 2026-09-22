@@ -4,8 +4,8 @@
   "description": "Voluntariado, proyectos, casos, logística y operaciones de campo — Vida Solidaria MDP.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a0733",
-  "theme_color": "#7c1fb0",
+  "background_color": "#F7F4F8",
+  "theme_color": "#73038C",
   "icons": [
     {
       "src": "/brand/icon-192.png",

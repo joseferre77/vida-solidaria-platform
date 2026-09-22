@@ -2,11 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Fase M — tema claro fiel al manual de identidad oficial (22/09/2026).
+ *
+ * El manual prohibe los degradados fuera del logo emblema (sección 04 ·
+ * COLOR) y define "Papel" (#F7F4F8) como fondo neutro de fichas y tablas,
+ * con "Tinta" (#2A1030, nunca negro puro) para todo el texto de lectura.
+ * También justifica esto por legibilidad al sol en la calle — el motivo
+ * por el que se reemplaza acá el degradado violeta oscuro que tenía la
+ * app hasta ahora (heredado de la landing de lanzamiento, antes de que
+ * existiera este manual).
+ */
+
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  background: linear-gradient(180deg, #1a0733 0%, #2c0a4d 60%, #3a0a5c 100%);
-  color: theme("colors.cream");
+  background: theme("colors.papel");
+  color: theme("colors.tinta");
+}
+
+/* Scrollbar clara, consistente con el resto del tema (antes quedaba con
+   la scrollbar oscura por defecto del navegador sobre fondo oscuro). */
+::selection {
+  background: theme("colors.amarillo");
+  color: theme("colors.tinta");
 }

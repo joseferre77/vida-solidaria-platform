@@ -2,18 +2,28 @@
   "name": "Vida Solidaria MDP",
   "slogan": "Tu esfuerzo, nuestro motor",
   "logo": "/brand/logo.png",
+  "logoHorizontal": "/brand/logo-horizontal.png",
+  "isotipo": "/brand/isotipo.png",
   "colors": {
-    "purpleDeep": "#3a0a5c",
-    "purple": "#7c1fb0",
-    "magenta": "#c026d3",
-    "yellow": "#ffd400",
-    "orange": "#ff8a00",
-    "navy": "#123a7a",
-    "cream": "#fff8ec"
+    "violeta": "#73038C",
+    "amarillo": "#FDED03",
+    "azul": "#013681",
+    "magenta": "#CE18E6",
+    "naranja": "#F09000",
+    "celeste": "#8CD5F9",
+    "papel": "#F7F4F8",
+    "tinta": "#2A1030",
+
+    "purpleDeep": "#73038C",
+    "purple": "#73038C",
+    "yellow": "#FDED03",
+    "orange": "#F09000",
+    "navy": "#013681",
+    "cream": "#F7F4F8"
   },
   "fonts": {
-    "display": "'Baloo 2', sans-serif",
-    "body": "'Poppins', system-ui, sans-serif"
+    "display": "'Outfit', sans-serif",
+    "body": "'Work Sans', system-ui, sans-serif"
   },
-  "note": "Tokens extraídos de la landing page de lanzamiento (countdown) ya entregada. No hay todavía un manual de marca formal — armar como entregable aparte si se necesita para otros materiales."
+  "note": "Manual de identidad oficial 'Vida Solidaria Mardel' v1.0 (recibido 22/09/2026). Reemplaza los tokens provisorios extraídos de la landing de lanzamiento. Fondo neutro = papel (claro), texto de lectura = tinta (nunca negro puro); violeta institucional, amarillo para acción, azul para ordenar datos. Sin degradados fuera del logo emblema (regla del manual, sección 04 · COLOR). Los nombres viejos (purpleDeep/purple/yellow/orange/navy/cream) se mantienen como alias para no romper las clases de Tailwind ya usadas en toda la app; apuntan a los mismos HEX oficiales."
 }

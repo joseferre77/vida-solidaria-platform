@@ -21,6 +21,12 @@ import { fetchMarDelPlataWeather, type WeatherNow } from "../lib/weather"
  * grandes el mismo array de secciones se muestra arriba, horizontal — un
  * solo componente, se adapta solo por breakpoint de Tailwind (sm:).
  *
+ * Fase M (22/09/2026) — reskin según el manual de identidad oficial: fondo
+ * Papel en vez del degradado violeta oscuro, íconos de línea en vez de
+ * emojis (el manual los prohíbe "en piezas oficiales"), avatar de usuario
+ * en violeta plano en vez de degradado magenta→naranja (el manual prohíbe
+ * degradados fuera del logo). Ver PLAN_FASE_M.md.
+ *
  * Nota: este componente hace su propio fetchMe() para mostrar nombre y
  * permisos. Cada página sigue haciendo el suyo, por separado, para su
  * propia lógica de redirect a /login y estado de carga — no se tocó esa
@@ -29,37 +35,100 @@ import { fetchMarDelPlataWeather, type WeatherNow } from "../lib/weather"
  * agregar una barra.
  */
 
+type IconName = "inicio" | "casos" | "proyectos" | "equipos" | "admin" | "analitica"
+
+// Íconos de línea, trazo 2px, caja 24, esquinas redondeadas, un solo color
+// (heredan color por currentColor) — sección 06 · SISTEMA GRÁFICO del
+// manual. Reemplazan los emojis que traía la barra antes.
+function Icon({ name, className }: { name: IconName; className?: string }) {
+  const common = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    className,
+  }
+  switch (name) {
+    case "inicio":
+      return (
+        <svg {...common}>
+          <path d="M4 11.5 12 4l8 7.5" />
+          <path d="M6 10v9h5v-6h2v6h5v-9" />
+        </svg>
+      )
+    case "casos":
+      return (
+        <svg {...common}>
+          <rect x="5" y="4" width="14" height="17" rx="1.5" />
+          <path d="M9 3.5h6v2.5H9z" />
+          <path d="M8.5 11h7M8.5 14.5h7M8.5 18h4" />
+        </svg>
+      )
+    case "proyectos":
+      return (
+        <svg {...common}>
+          <path d="M4 6.5h5.5L11 8.5h9V19a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7.5a1 1 0 0 1 1-1z" />
+        </svg>
+      )
+    case "equipos":
+      return (
+        <svg {...common}>
+          <circle cx="9" cy="8.5" r="3" />
+          <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5" />
+          <circle cx="17" cy="8.5" r="2.3" />
+          <path d="M15.7 14.2c2.4.4 4.3 2.2 4.3 4.8" />
+        </svg>
+      )
+    case "admin":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 3.5v2.2M12 18.3v2.2M4.6 7.3l1.9 1.1M17.5 15.6l1.9 1.1M4.6 16.7l1.9-1.1M17.5 8.4l1.9-1.1M3.5 12h2.2M18.3 12h2.2" />
+        </svg>
+      )
+    case "analitica":
+      return (
+        <svg {...common}>
+          <path d="M4 20V10M11 20V4M18 20v-7" />
+          <path d="M3 20h18" />
+        </svg>
+      )
+  }
+}
+
 const NAV_ITEMS: {
   href: string
   label: string
-  icon: string
+  icon: IconName
   visible: (user: SessionUser) => boolean
 }[] = [
-  { href: "/dashboard", label: "Inicio", icon: "🏠", visible: () => true },
+  { href: "/dashboard", label: "Inicio", icon: "inicio", visible: () => true },
   {
     href: "/casos",
     label: "Casos",
-    icon: "🗂️",
+    icon: "casos",
     visible: (u) => hasPermission(u, "cases.read") || hasPermission(u, "cases.write"),
   },
-  { href: "/proyectos", label: "Proyectos", icon: "📁", visible: () => true },
+  { href: "/proyectos", label: "Proyectos", icon: "proyectos", visible: () => true },
   {
     href: "/equipos",
     label: "Equipos",
-    icon: "👥",
+    icon: "equipos",
     visible: (u) => hasPermission(u, "field_ops.read") || hasPermission(u, "logistics.read"),
   },
   {
     href: "/administracion",
     label: "Admin",
-    icon: "⚙️",
+    icon: "admin",
     visible: (u) =>
       hasPermission(u, "projects.admin") || hasPermission(u, "surveys.manage") || hasPermission(u, "users.manage"),
   },
   {
     href: "/analitica",
     label: "Analítica",
-    icon: "📊",
+    icon: "analitica",
     visible: (u) => hasPermission(u, "analytics.read"),
   },
 ]
@@ -134,13 +203,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const visibleItems = user ? NAV_ITEMS.filter((i) => i.visible(user)) : []
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-white/10 bg-black/25 px-3 py-2 backdrop-blur sm:px-5">
-        <Link href="/dashboard" className="flex min-w-0 items-center gap-2">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-yellow font-display text-sm font-bold text-purple-deep">
-            VS
+    <div className="flex min-h-screen flex-col bg-papel">
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-violeta/15 bg-papel/95 px-3 py-2 backdrop-blur sm:px-5">
+        <Link href="/dashboard" className="flex min-w-0 shrink-0 items-center gap-2">
+          <img src="/brand/isotipo.png" alt="" className="h-8 w-auto sm:hidden" />
+          <img src="/brand/logo-horizontal.png" alt="Vida Solidaria" className="hidden h-7 w-auto sm:block" />
+          <span className="hidden truncate font-display text-sm font-bold text-violeta/70 md:inline">
+            · {sectionTitle}
           </span>
-          <span className="truncate font-display text-sm font-bold text-yellow sm:text-base">{sectionTitle}</span>
         </Link>
 
         <nav className="hidden flex-1 items-center justify-center gap-1 sm:flex">
@@ -148,11 +218,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link
               key={item.href}
               href={item.href}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                isActive(pathname, item.href) ? "bg-white/10 text-yellow" : "text-cream/60 hover:text-cream"
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                isActive(pathname, item.href) ? "bg-amarillo text-tinta" : "text-violeta/70 hover:bg-violeta/8 hover:text-violeta"
               }`}
             >
-              {item.icon} {item.label}
+              <Icon name={item.icon} className="h-4 w-4 shrink-0" />
+              {item.label}
             </Link>
           ))}
         </nav>
@@ -160,16 +231,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
           {now && (
             <>
-              <span className="hidden items-center gap-1 whitespace-nowrap text-xs text-cream/70 sm:flex">
-                🕐 {dateStr} · {timeStr}
+              <span className="hidden items-center gap-1 whitespace-nowrap text-xs text-tinta/55 sm:flex">
+                {dateStr} · {timeStr}
               </span>
-              <span className="flex items-center gap-1 whitespace-nowrap text-xs text-cream/70 sm:hidden">
-                🕐 {timeStr}
+              <span className="flex items-center gap-1 whitespace-nowrap text-xs text-tinta/55 sm:hidden">
+                {timeStr}
               </span>
             </>
           )}
           {weather && (
-            <span className="flex items-center gap-1 whitespace-nowrap text-xs text-cream/70">
+            <span className="flex items-center gap-1 whitespace-nowrap text-xs text-tinta/55">
               {weather.emoji} {weather.tempC}°C
             </span>
           )}
@@ -177,27 +248,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="relative">
               <button
                 onClick={() => setMenuOpen((v) => !v)}
-                className="flex items-center gap-1.5 rounded-full bg-white/10 py-1 pl-1 pr-2 hover:bg-white/15"
+                className="flex items-center gap-1.5 rounded-full bg-violeta/8 py-1 pl-1 pr-2 hover:bg-violeta/15"
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-magenta to-orange text-[10px] font-bold text-cream">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violeta text-[10px] font-bold text-papel">
                   {initials(user.name)}
                 </span>
-                <span className="hidden max-w-[100px] truncate text-xs font-medium text-cream sm:inline">
+                <span className="hidden max-w-[100px] truncate text-xs font-medium text-tinta sm:inline">
                   {user.name}
                 </span>
               </button>
               {menuOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-white/15 bg-purple-deep py-1 shadow-xl">
-                    <p className="truncate border-b border-white/10 px-3 py-2 text-xs text-cream/50">{user.name}</p>
+                  <div className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-violeta/15 bg-papel py-1 shadow-lg">
+                    <p className="truncate border-b border-violeta/10 px-3 py-2 text-xs text-tinta/50">{user.name}</p>
                     <button
                       onClick={async () => {
                         setMenuOpen(false)
                         await logout()
                         router.push("/login")
                       }}
-                      className="block w-full px-3 py-2 text-left text-sm text-cream hover:bg-white/10"
+                      className="block w-full px-3 py-2 text-left text-sm text-tinta hover:bg-violeta/8"
                     >
                       Cerrar sesión
                     </button>
@@ -211,16 +282,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex-1 pb-16 sm:pb-0">{children}</div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-white/10 bg-purple-deep/95 backdrop-blur sm:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-violeta/15 bg-papel/95 backdrop-blur sm:hidden">
         {visibleItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
             className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-semibold ${
-              isActive(pathname, item.href) ? "text-yellow" : "text-cream/45"
+              isActive(pathname, item.href) ? "text-violeta" : "text-tinta/40"
             }`}
           >
-            <span className="text-lg leading-none">{item.icon}</span>
+            <Icon name={item.icon} className="h-5 w-5" />
             {item.label}
           </Link>
         ))}
