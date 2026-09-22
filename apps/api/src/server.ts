@@ -18,8 +18,10 @@ import { casesRoutes } from "./modules/cases/cases.routes"
 import { notificationsRoutes } from "./modules/notifications/notifications.routes"
 import { publicRoutes } from "./modules/public/public.routes"
 import { analyticsRoutes } from "./modules/analytics/analytics.routes"
+import { coordinationRoutes } from "./modules/coordination/coordination.routes"
 import { startScheduledTicks } from "./lib/scheduled-ticks"
 import { ensurePendingMigrations } from "./lib/ensure-migrations"
+import { ensurePermissionsSeeded } from "./lib/ensure-permissions"
 
 async function main() {
   const app = Fastify({
@@ -120,6 +122,7 @@ async function main() {
   await app.register(notificationsRoutes, { prefix: "/api" })
   await app.register(publicRoutes, { prefix: "/api" })
   await app.register(analyticsRoutes, { prefix: "/api" })
+  await app.register(coordinationRoutes, { prefix: "/api" })
 
   // TODO (Módulo 4+): registrar acá finance.routes (donaciones/compras/rendición).
   // logistics/field-ops/cases todavía sin Socket.IO (ver notas en esos módulos).
@@ -129,6 +132,11 @@ async function main() {
   // aceptar tráfico, para que ninguna request pegue contra columnas que
   // todavía no existen.
   await ensurePendingMigrations()
+
+  // Ver ensure-permissions.ts: siembra roles/permissions/role_permissions
+  // con esta misma conexión, por el mismo motivo — un script suelto
+  // (prisma/seed.ts vía tsx) panickea en este hosting.
+  await ensurePermissionsSeeded()
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" })
   console.log(`✅ API escuchando en http://0.0.0.0:${env.PORT}`)

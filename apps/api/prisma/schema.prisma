@@ -69,8 +69,26 @@ model User {
   surveyResponses   SurveyResponse[]
   projectExpenses   ProjectExpense[]
   projectNotes      ProjectNote[]
+  coordinatorMessages CoordinatorMessage[]
 
   @@map("users")
+}
+
+/// Fase M — chat de coordinadores: un solo canal interno, visible solo para
+/// quienes tienen el permiso "coordination.chat" (todos los roles menos
+/// voluntario). Sin edición ni borrado de mensajes en esta primera versión
+/// — se resuelve por convención (avisar en el chat), como cualquier chat
+/// simple de equipo. El front actualiza por polling, no hay Socket.IO
+/// integrado todavía en la plataforma.
+model CoordinatorMessage {
+  id        String   @id @default(uuid())
+  body      String
+  createdById String @map("created_by_id")
+  createdBy User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("coordinator_messages")
 }
 
 /// Contador atómico genérico (incrementar dentro de una transacción para

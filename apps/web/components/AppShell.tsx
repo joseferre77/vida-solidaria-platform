@@ -35,7 +35,7 @@ import { fetchMarDelPlataWeather, type WeatherNow } from "../lib/weather"
  * agregar una barra.
  */
 
-type IconName = "inicio" | "casos" | "proyectos" | "equipos" | "admin" | "analitica"
+type IconName = "inicio" | "casos" | "proyectos" | "equipos" | "admin" | "analitica" | "chat"
 
 // Íconos de línea, trazo 2px, caja 24, esquinas redondeadas, un solo color
 // (heredan color por currentColor) — sección 06 · SISTEMA GRÁFICO del
@@ -95,6 +95,12 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
           <path d="M3 20h18" />
         </svg>
       )
+    case "chat":
+      return (
+        <svg {...common}>
+          <path d="M4 5.5h16v10H9l-4 3.5v-3.5H4z" />
+        </svg>
+      )
   }
 }
 
@@ -131,6 +137,12 @@ const NAV_ITEMS: {
     icon: "analitica",
     visible: (u) => hasPermission(u, "analytics.read"),
   },
+  {
+    href: "/coordinacion",
+    label: "Chat",
+    icon: "chat",
+    visible: (u) => hasPermission(u, "coordination.chat"),
+  },
 ]
 
 const SECTION_TITLE: { test: (path: string) => boolean; label: string }[] = [
@@ -140,6 +152,7 @@ const SECTION_TITLE: { test: (path: string) => boolean; label: string }[] = [
   { test: (p) => p.startsWith("/equipos"), label: "Equipos y Secciones" },
   { test: (p) => p.startsWith("/administracion"), label: "Administración" },
   { test: (p) => p.startsWith("/analitica"), label: "Analítica" },
+  { test: (p) => p.startsWith("/coordinacion"), label: "Chat de coordinadores" },
 ]
 
 function sectionTitleFor(path: string) {

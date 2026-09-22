@@ -37,6 +37,8 @@ export const PERMISSIONS = [
   "surveys.manage",
   // Analítica
   "analytics.read",
+  // Chat de coordinadores (un solo canal, interno)
+  "coordination.chat",
 ] as const
 
 export type PermissionSlug = (typeof PERMISSIONS)[number]
@@ -94,6 +96,7 @@ export const ROLE_PERMISSIONS: Record<Exclude<GlobalRoleSlug, "admin_general">, 
     "finance.read",
     "surveys.manage",
     "analytics.read",
+    "coordination.chat",
   ],
   direccion_proyectos: [
     "projects.read",
@@ -101,11 +104,18 @@ export const ROLE_PERMISSIONS: Record<Exclude<GlobalRoleSlug, "admin_general">, 
     "projects.admin",
     "surveys.manage",
     "analytics.read",
+    "coordination.chat",
   ],
-  coordinacion_logistica: ["logistics.read", "logistics.write", "field_ops.read"],
-  coordinacion_comercial: ["finance.read", "finance.write"],
-  coordinacion_recepcion: ["cases.read", "cases.write"],
-  coordinacion_extraccion: ["field_ops.read", "field_ops.write", "logistics.read"],
-  coordinador_relevamiento: ["cases.read", "cases.write", "field_ops.read", "field_ops.write"],
+  coordinacion_logistica: ["logistics.read", "logistics.write", "field_ops.read", "coordination.chat"],
+  coordinacion_comercial: ["finance.read", "finance.write", "coordination.chat"],
+  coordinacion_recepcion: ["cases.read", "cases.write", "coordination.chat"],
+  coordinacion_extraccion: ["field_ops.read", "field_ops.write", "logistics.read", "coordination.chat"],
+  coordinador_relevamiento: [
+    "cases.read",
+    "cases.write",
+    "field_ops.read",
+    "field_ops.write",
+    "coordination.chat",
+  ],
   voluntario: ["field_ops.read", "field_ops.write"],
 }
