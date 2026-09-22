@@ -150,6 +150,31 @@ function CasosKpis({ kpis }: { kpis: CaseKpis | null }) {
  * de persona si no la sacaron) — no solo los que tienen foto, para no dar
  * la falsa impresión de "pocos casos cargados".
  */
+// Ancho de cada tarjeta del slider — DEBE coincidir con el ancho real de
+// CaseAvatarFrame size="lg" (h-44 w-36 = 144px). La versión anterior tenía
+// la tarjeta a 120px (7.5rem) mientras el marco de foto medía 144px, lo
+// que hacía que el marco se saliera de su columna y pisara a la tarjeta de
+// al lado — esa era la causa de los "huecos"/costuras raras que viste al
+// deslizar. GAP_PX = separación entre tarjetas (gap-3 = 12px).
+const SLIDER_CARD_PX = 144
+const SLIDER_GAP_PX = 12
+const SLIDER_STEP_PX = SLIDER_CARD_PX + SLIDER_GAP_PX
+
+/**
+ * Slider de fotos de casos. Pedido de Josecito (22/09/2026 y ajuste del
+ * 23/09/2026): que se pueda arrastrar con el dedo o con el mouse para
+ * volver atrás si se pasó una foto, y que tocar/clickear una foto abra el
+ * caso sin quedar "arrastrando" de fondo.
+ *
+ * Se reescribió sobre scroll nativo del navegador (`overflow-x-auto` +
+ * `scroll-snap`) en vez de mover un `translateX` calculado a mano: así el
+ * arrastre táctil sale gratis (es scroll de verdad), el autoplay solo
+ * llama a `scrollTo(...)` y nunca puede desalinearse del ancho real de las
+ * tarjetas, y en desktop se agrega arrastre con mouse (los navegadores no
+ * dejan arrastrar con el mouse un contenedor con scroll por default).
+ * Un arrastre real (más de ~6px de movimiento) nunca dispara `onOpen` —
+ * eso es lo que evita que "cargue el perfil" sin querer a mitad de gesto.
+ */
 function CasosSlider({ cases, onOpen }: { cases: CaseListItem[]; onOpen: (id: string) => void }) {
   const items = useMemo(
     () =>
@@ -161,38 +186,101 @@ function CasosSlider({ cases, onOpen }: { cases: CaseListItem[]; onOpen: (id: st
   const [index, setIndex] = useState(0)
   const [paused, setPaused] = useState(false)
   const trackRef = useRef<HTMLDivElement>(null)
+  const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const drag = useRef<{ startX: number; startScroll: number; moved: boolean } | null>(null)
+
+  function scrollToIndex(i: number, smooth = true) {
+    trackRef.current?.scrollTo({ left: i * SLIDER_STEP_PX, behavior: smooth ? "smooth" : "auto" })
+  }
+
+  // Pausa el autoplay al interactuar y lo retoma solo, a los 6s de
+  // inactividad — así no "pelea" con quien está mirando/arrastrando, pero
+  // tampoco se queda pausado para siempre en mobile (donde no hay
+  // "mouse leave" que lo reactive).
+  function pauseWithResume() {
+    setPaused(true)
+    if (resumeTimer.current) clearTimeout(resumeTimer.current)
+    resumeTimer.current = setTimeout(() => setPaused(false), 6000)
+  }
+
+  useEffect(() => () => { if (resumeTimer.current) clearTimeout(resumeTimer.current) }, [])
 
   useEffect(() => {
     if (paused || items.length <= 1) return
-    const t = setInterval(() => setIndex((i) => (i + 1) % items.length), 4000)
+    const t = setInterval(() => {
+      setIndex((i) => {
+        const next = (i + 1) % items.length
+        scrollToIndex(next)
+        return next
+      })
+    }, 4000)
     return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paused, items.length])
 
   useEffect(() => {
     setIndex(0)
+    scrollToIndex(0, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.length])
+
+  function handleScroll() {
+    const el = trackRef.current
+    if (!el) return
+    setIndex(Math.round(el.scrollLeft / SLIDER_STEP_PX))
+  }
+
+  // Arrastre con MOUSE en desktop (el arrastre táctil ya funciona solo,
+  // es scroll nativo del navegador — acá solo se pausa el autoplay).
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType === "touch") return
+    const el = trackRef.current
+    if (!el) return
+    drag.current = { startX: e.clientX, startScroll: el.scrollLeft, moved: false }
+    el.setPointerCapture(e.pointerId)
+    pauseWithResume()
+  }
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const st = drag.current
+    const el = trackRef.current
+    if (!st || !el) return
+    const dx = e.clientX - st.startX
+    if (Math.abs(dx) > 6) st.moved = true
+    el.scrollLeft = st.startScroll - dx
+  }
+  function endDrag() {
+    drag.current = null
+  }
+
+  function handleCardClick(id: string) {
+    // Si fue un arrastre de verdad (mouse o touch con scroll de por
+    // medio), no se abre el caso — solo un tap/click sin desplazamiento.
+    if (drag.current?.moved) return
+    onOpen(id)
+  }
 
   if (items.length === 0) return null
 
   return (
-    <div
-      className="mb-5 overflow-hidden rounded-xl border border-white/10 bg-white/5 p-3"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onTouchStart={() => setPaused(true)}
-    >
+    <div className="mb-5 rounded-xl border border-white/10 bg-white/5 p-3">
       <div
         ref={trackRef}
-        className="flex gap-3 transition-transform duration-500 ease-out"
-        style={{ transform: `translateX(calc(-${index} * (7.5rem + 0.75rem)))` }}
+        onScroll={handleScroll}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerLeave={endDrag}
+        onTouchStart={pauseWithResume}
+        className="flex gap-3 overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={{ scrollSnapType: "x mandatory", touchAction: "pan-x", cursor: "grab" }}
       >
         {items.map((c) => (
           <button
             key={c.id}
             type="button"
-            onClick={() => onOpen(c.id)}
-            className="flex w-30 shrink-0 flex-col items-center gap-1.5 text-center"
-            style={{ width: "7.5rem" }}
+            onClick={() => handleCardClick(c.id)}
+            className="flex shrink-0 select-none flex-col items-center gap-1.5 text-center"
+            style={{ width: SLIDER_CARD_PX, scrollSnapAlign: "start" }}
           >
             <CaseAvatarFrame url={c.mainPhotoUrl} name={c.fullName} size="lg" />
             <span className="line-clamp-1 text-xs font-medium text-cream">{c.fullName}</span>
@@ -205,7 +293,10 @@ function CasosSlider({ cases, onOpen }: { cases: CaseListItem[]; onOpen: (id: st
             <button
               key={c.id}
               type="button"
-              onClick={() => setIndex(i)}
+              onClick={() => {
+                setIndex(i)
+                scrollToIndex(i)
+              }}
               aria-label={`Ir a la foto ${i + 1}`}
               className={`h-1.5 rounded-full transition-all ${i === index ? "w-4 bg-yellow" : "w-1.5 bg-white/20"}`}
             />
