@@ -393,3 +393,55 @@ en procesos lanzados ad-hoc — la solución que quedó andando es que la
 propia API aplica las migraciones pendientes al arrancar
 (`ensure-migrations.ts`), así que un `touch tmp/restart.txt` alcanza para
 que una migración nueva se aplique sola.
+
+## 14) Bloque "Kit semanal + tablero del voluntario" (23/09/2026)
+
+Elegiste este bloque como prioridad después de la revisión honesta del
+punto 13 — cubre 3 de los ítems del diseño original que estaban marcados
+como faltantes. Desplegado y verificado en producción (API + web).
+
+**1. Armar el kit en un solo paso desde Cocina** — antes, el equipamiento
+reusable (conservadora, olla) no tenía ninguna conexión con un lote de
+cocina: vivía únicamente en el préstamo suelto de la pestaña Stock, y si
+intentabas sumarlo como "insumo" de un lote, la API lo rechazaba (es
+equipamiento, no se consume). Ahora, el mismo modal de detalle de un lote
+(pestaña Cocina → abrís un lote) tiene una sección nueva "Equipamiento
+(kit)" al lado de "Insumos": elegís conservadora/olla/termo, cantidad, y
+queda sumado al kit a nombre del responsable de esa cocina — un préstamo
+más, pero linkeado al lote. Requiere haber asignado un responsable arriba
+primero (el kit queda a su nombre).
+
+**2. Vista personal del voluntario asignado** — nuevo widget destacado
+arriba del todo en el Dashboard ("Te toca cocinar — [nombre del lote]"),
+que le aparece a cualquier persona logueada que sea responsable o esté
+asignada a un lote de cocina activo (no entregado todavía) — sin
+necesitar permiso de logística, autogestionado como Presentismo. Muestra
+el estado actual, las porciones objetivo, y la lista completa de lo que
+se le asignó (insumos + equipamiento, remito-style), con un link directo
+a Cocina para ver el detalle completo.
+
+**3. Traspaso directo de custodia (cocinero → despachador)** — antes había
+que devolver el préstamo (queda "sin dueño" un rato) y después prestarlo
+de nuevo a la próxima persona: dos llamadas separadas. Ahora hay un botón
+"Pasar a otra persona" (en Stock, junto a cada ítem prestado, y también
+dentro del detalle de un lote de Cocina) que cierra el préstamo viejo y
+abre uno nuevo a la vez — un solo paso, con historial completo de todos
+modos (se ve en "Ver historial" de cada insumo).
+
+Nota técnica: se agregó `StockCustody.batchId` (nullable, migración
+`20260922192817_fase_l_kit_semanal_custodia_batch`) para poder linkear un
+préstamo de equipamiento a un lote de cocina sin tocar el ledger de
+`StockMovement` (que sigue siendo exclusivo de lo que se consume).
+
+### Lo que sigue quedando afuera
+
+- **Chat de coordinadores**: sigue sin tocar, es la pieza más grande que
+  falta.
+- **Vista semáforo en vivo agrupada**, **día/hora/punto de encuentro
+  configurable**, **aviso automático "buenos días" el día del evento**,
+  **KPI de usuario más activo**, **ampliación de Stock** (dijiste que
+  falta más profundidad — todavía no definimos exactamente qué) y
+  **catalogación completa de Stock** (dijiste "sigue sin catalogar" — necesito
+  que me cuentes puntualmente qué te falta ver ahí, porque lo que
+  encontré en el código ya cubre catálogo + código automático + categoría
+  + costo + punto de pedido).
