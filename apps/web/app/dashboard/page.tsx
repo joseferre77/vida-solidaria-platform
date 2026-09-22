@@ -12,6 +12,7 @@ import {
   type DashboardSummary,
   type ProjectListItem,
 } from "../../lib/projects"
+import { KITCHEN_STATUS_LABEL, listMyKitchenBatches, type KitchenBatchItem } from "../../lib/logistics"
 import { formatDate, formatMinutes, formatMoney, timeAgo } from "../../lib/format"
 
 // Orden categórico fijo (nunca ciclado) para los widgets de distribución —
@@ -26,6 +27,7 @@ export default function DashboardPage() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [projects, setProjects] = useState<ProjectListItem[] | null>(null)
+  const [myKitchenBatches, setMyKitchenBatches] = useState<KitchenBatchItem[] | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -45,6 +47,12 @@ export default function DashboardPage() {
     listProjects()
       .then(setProjects)
       .catch(() => setProjects(null))
+    // Fase L — "tablero del voluntario": autogestionado, cualquier usuario
+    // logueado ve sus propios lotes de cocina (sea responsable o ayudante),
+    // sin requerir permiso de logística — mismo criterio que Presentismo.
+    listMyKitchenBatches()
+      .then(setMyKitchenBatches)
+      .catch(() => setMyKitchenBatches(null))
   }
 
   useEffect(() => {
@@ -109,6 +117,8 @@ export default function DashboardPage() {
           </button>
         </div>
       )}
+
+      <MyKitchenBatchWidget batches={myKitchenBatches} />
 
       <RoleGate user={user ?? null} permission="projects.read">
         <p className="mb-2 text-[11px] uppercase tracking-wide text-cream/40">
@@ -208,6 +218,54 @@ function Widget({ title, children, className }: { title: string; children: React
       <h2 className="mb-3 font-display text-sm font-semibold text-cream/90">{title}</h2>
       {children}
     </div>
+  )
+}
+
+// Fase L — "tablero del voluntario": vista personal tipo remito de "te toca
+// cocinar, te asignamos esto". Solo se muestra si hay algo activo (no
+// entregado) para esta persona — nada que mostrarle a quien no está
+// asignado a ninguna cocina.
+function MyKitchenBatchWidget({ batches }: { batches: KitchenBatchItem[] | null }) {
+  const active = (batches ?? []).filter((b) => b.status !== "entregado")
+  if (active.length === 0) return null
+
+  return (
+    <section className="mb-6 space-y-3">
+      {active.map((b) => {
+        const activeEquipment = b.equipment.filter((e) => !e.returnedAt)
+        return (
+          <div key={b.id} className="rounded-2xl border border-yellow/40 bg-yellow/10 p-5">
+            <p className="font-display text-base font-bold text-yellow">
+              Te toca cocinar — {b.name}
+            </p>
+            <p className="mt-1 text-xs text-cream/60">
+              {KITCHEN_STATUS_LABEL[b.status]} · {b.targetServings} porciones objetivo
+              {b.responsible && <> · responsable: {b.responsible.name}</>}
+            </p>
+            {(b.ingredients.length > 0 || activeEquipment.length > 0) && (
+              <div className="mt-3 text-sm text-cream/80">
+                <p className="mb-1 text-xs uppercase tracking-wide text-cream/40">Te asignamos</p>
+                <ul className="space-y-0.5">
+                  {b.ingredients.map((i) => (
+                    <li key={i.stockItemId}>
+                      · {i.quantityAssigned} {i.unit} {i.stockItemName}
+                    </li>
+                  ))}
+                  {activeEquipment.map((e) => (
+                    <li key={e.custodyId}>
+                      · {e.quantity} {e.stockItemName} (en manos de {e.holder?.name ?? "—"})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <Link href="/equipos?tab=cocina" className="mt-3 inline-block text-xs text-yellow hover:underline">
+              Ver detalle en Cocina →
+            </Link>
+          </div>
+        )
+      })}
+    </section>
   )
 }
 

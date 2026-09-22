@@ -92,6 +92,21 @@ const returnCustodySchema = z.object({
   returnedNotes: z.string().trim().optional(),
 })
 
+const transferCustodySchema = z.object({
+  holderUserId: z.string().uuid(),
+  notes: z.string().trim().optional(),
+})
+
+// Fase L — "armar kit en un solo paso": sumar equipamiento reusable
+// (conservadora, olla) a un lote de cocina crea una StockCustody linkeada
+// al lote (ver equipmentSchema más abajo, junto a ingredientSchema).
+const equipmentSchema = z.object({
+  stockItemId: z.string().uuid(),
+  quantity: z.number().positive().optional(),
+  holderUserId: z.string().uuid().optional(),
+  notes: z.string().trim().optional(),
+})
+
 async function userMapFor(ids: (string | null | undefined)[]) {
   const uniqueIds = Array.from(new Set(ids.filter((id): id is string => Boolean(id))))
   if (uniqueIds.length === 0) return new Map<string, { id: string; name: string; email: string }>()
@@ -153,6 +168,10 @@ const BATCH_INCLUDE = {
   ingredients: { include: { stockItem: true } },
   assignees: true,
   statusHistory: { orderBy: { changedAt: "desc" } as const },
+  // Fase L — equipamiento reusable sumado al kit (activo + histórico, para
+  // que el remito del voluntario muestre qué se le dio aunque ya lo haya
+  // devuelto o traspasado).
+  custodies: { include: { stockItem: true }, orderBy: { checkedOutAt: "desc" } as const },
 } as const
 
 async function serializeBatch(batch: {
@@ -166,12 +185,22 @@ async function serializeBatch(batch: {
   ingredients: { stockItemId: string; quantityAssigned: unknown; stockItem: { id: string; name: string; unit: string } }[]
   assignees: { userId: string; taskLabel: string | null }[]
   statusHistory: { id: string; toStatus: string; changedBy: string; changedAt: Date }[]
+  custodies: {
+    id: string
+    stockItemId: string
+    holderUserId: string
+    quantity: unknown
+    checkedOutAt: Date
+    returnedAt: Date | null
+    stockItem: { id: string; name: string; unit: string }
+  }[]
 }) {
   const users = await userMapFor([
     batch.createdBy,
     batch.responsibleUserId,
     ...batch.assignees.map((a) => a.userId),
     ...batch.statusHistory.map((h) => h.changedBy),
+    ...batch.custodies.map((c) => c.holderUserId),
   ])
   return {
     id: batch.id,
@@ -192,6 +221,16 @@ async function serializeBatch(batch: {
       toStatus: h.toStatus,
       changedAt: h.changedAt,
       changedBy: users.get(h.changedBy) ?? null,
+    })),
+    equipment: batch.custodies.map((c) => ({
+      custodyId: c.id,
+      stockItemId: c.stockItemId,
+      stockItemName: c.stockItem.name,
+      unit: c.stockItem.unit,
+      quantity: c.quantity,
+      holder: users.get(c.holderUserId) ?? null,
+      checkedOutAt: c.checkedOutAt,
+      returnedAt: c.returnedAt,
     })),
   }
 }
@@ -387,6 +426,48 @@ export async function logisticsRoutes(app: FastifyInstance) {
     },
   )
 
+  // Traspaso directo de custodia (ej. cocinero → despachador) en un solo
+  // paso: antes había que devolver y después prestarle a la próxima
+  // persona (dos llamadas, y en el medio el ítem quedaba "sin dueño"). Acá
+  // se cierra el préstamo viejo y se abre uno nuevo atómicamente,
+  // conservando el link al lote de cocina si lo tenía (Fase L).
+  app.post(
+    "/stock-custody/:custodyId/transfer",
+    { preHandler: [requireAuth, requirePermission("logistics.write")] },
+    async (request, reply) => {
+      const { custodyId } = request.params as { custodyId: string }
+      const body = transferCustodySchema.parse(request.body)
+      const current = await prisma.stockCustody.findUniqueOrThrow({ where: { id: custodyId } })
+      if (current.returnedAt) {
+        return reply.code(400).send({ error: "Este préstamo ya fue devuelto, no se puede traspasar" })
+      }
+      if (current.holderUserId === body.holderUserId) {
+        return reply.code(400).send({ error: "Ya lo tiene esa persona" })
+      }
+      await prisma.$transaction([
+        prisma.stockCustody.update({
+          where: { id: custodyId },
+          data: { returnedAt: new Date(), returnedNotes: body.notes || "Traspaso directo a otra persona" },
+        }),
+        prisma.stockCustody.create({
+          data: {
+            stockItemId: current.stockItemId,
+            holderUserId: body.holderUserId,
+            quantity: current.quantity,
+            notes: current.notes,
+            checkedOutBy: request.user!.sub,
+            batchId: current.batchId,
+          },
+        }),
+      ])
+      const item = await prisma.stockItem.findUniqueOrThrow({
+        where: { id: current.stockItemId },
+        include: STOCK_ITEM_INCLUDE,
+      })
+      return reply.code(201).send(await serializeStockItem(item))
+    },
+  )
+
   app.get(
     "/stock-items/:id/custody-history",
     { preHandler: [requireAuth, requirePermission("logistics.read")] },
@@ -410,6 +491,21 @@ export async function logisticsRoutes(app: FastifyInstance) {
   // ── Lotes de cocina ──
   app.get("/kitchen-batches", { preHandler: [requireAuth, requirePermission("logistics.read")] }, async () => {
     const batches = await prisma.kitchenBatch.findMany({ include: BATCH_INCLUDE, orderBy: { createdAt: "desc" } })
+    return Promise.all(batches.map(serializeBatch))
+  })
+
+  // Fase L — "tablero del voluntario": el propio asignado (responsable o
+  // ayudante) ve sus lotes acá, sin requerir logistics.read — mismo
+  // criterio que /weekly-availability/me: autogestión de lo propio. Es lo
+  // que alimenta el widget "Te toca cocinar" del dashboard.
+  app.get("/kitchen-batches/mine", { preHandler: requireAuth }, async (request) => {
+    const userId = request.user!.sub
+    const batches = await prisma.kitchenBatch.findMany({
+      where: { OR: [{ responsibleUserId: userId }, { assignees: { some: { userId } } }] },
+      include: BATCH_INCLUDE,
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    })
     return Promise.all(batches.map(serializeBatch))
   })
 
@@ -545,6 +641,66 @@ export async function logisticsRoutes(app: FastifyInstance) {
             relatedEntityId: id,
             createdBy: request.user!.sub,
           },
+        })
+      }
+      const updatedBatch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
+      return serializeBatch(updatedBatch)
+    },
+  )
+
+  // Fase L — "armar kit en un solo paso desde Cocina": sumar equipamiento
+  // reusable (conservadora, olla) al lote no descuenta stock — abre un
+  // préstamo (StockCustody) linkeado al lote, a nombre del responsable de
+  // esta cocina (o de quien se indique explícitamente). Junto con
+  // /ingredients de arriba, la pantalla de detalle del lote arma el kit
+  // completo (insumos + equipamiento) desde un solo modal.
+  app.post(
+    "/kitchen-batches/:id/equipment",
+    { preHandler: [requireAuth, requirePermission("logistics.write")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const body = equipmentSchema.parse(request.body)
+      const batch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id } })
+      const stockItem = await prisma.stockItem.findUniqueOrThrow({ where: { id: body.stockItemId } })
+      if (!stockItem.isReusable) {
+        return reply.code(400).send({ error: "Este insumo no es reusable, no aplica como equipamiento del kit" })
+      }
+      const holderUserId = body.holderUserId || batch.responsibleUserId
+      if (!holderUserId) {
+        return reply
+          .code(400)
+          .send({ error: "Asigná un responsable a este lote antes de sumar equipamiento, o indicá quién lo lleva" })
+      }
+      await prisma.stockCustody.create({
+        data: {
+          stockItemId: body.stockItemId,
+          holderUserId,
+          quantity: body.quantity ?? 1,
+          notes: body.notes || null,
+          checkedOutBy: request.user!.sub,
+          batchId: id,
+        },
+      })
+      const updatedBatch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
+      return reply.code(201).send(await serializeBatch(updatedBatch))
+    },
+  )
+
+  // Quitar equipamiento del kit no borra el préstamo (queda como historial,
+  // misma convención que /stock-custody/:id/return) — lo marca devuelto.
+  app.delete(
+    "/kitchen-batches/:id/equipment/:custodyId",
+    { preHandler: [requireAuth, requirePermission("logistics.write")] },
+    async (request, reply) => {
+      const { id, custodyId } = request.params as { id: string; custodyId: string }
+      const custody = await prisma.stockCustody.findUniqueOrThrow({ where: { id: custodyId } })
+      if (custody.batchId !== id) {
+        return reply.code(400).send({ error: "Ese préstamo no pertenece a este lote" })
+      }
+      if (!custody.returnedAt) {
+        await prisma.stockCustody.update({
+          where: { id: custodyId },
+          data: { returnedAt: new Date(), returnedNotes: "Quitado del kit" },
         })
       }
       const updatedBatch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })

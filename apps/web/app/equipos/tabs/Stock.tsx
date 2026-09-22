@@ -13,6 +13,7 @@ import {
   listStockItems,
   listStockMovements,
   returnStockCustody,
+  transferStockCustody,
   updateStockItem,
   type StockItemItem,
   type StockMovementItem,
@@ -218,6 +219,8 @@ function StockItemCard({
 }) {
   const [pickUserId, setPickUserId] = useState("")
   const [busy, setBusy] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
+  const [transferTo, setTransferTo] = useState("")
   const [showMovement, setShowMovement] = useState(false)
   const [movementType, setMovementType] = useState<"ingreso" | "egreso">("ingreso")
   const [movementQty, setMovementQty] = useState("")
@@ -281,19 +284,65 @@ function StockItemCard({
                 desde {formatDate(item.activeCustody.checkedOutAt)}
               </p>
               {item.activeCustody.notes && <p className="text-xs text-cream/40">{item.activeCustody.notes}</p>}
-              <button
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true)
-                  returnStockCustody(item.activeCustody!.id)
-                    .then(onChanged)
-                    .catch((e) => onError(e.message))
-                    .finally(() => setBusy(false))
-                }}
-                className="mt-1.5 rounded-lg bg-yellow/90 px-3 py-1 text-xs font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
-              >
-                Marcar devuelto (a lo de Lourdes)
-              </button>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setBusy(true)
+                    returnStockCustody(item.activeCustody!.id)
+                      .then(onChanged)
+                      .catch((e) => onError(e.message))
+                      .finally(() => setBusy(false))
+                  }}
+                  className="rounded-lg bg-yellow/90 px-3 py-1 text-xs font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+                >
+                  Marcar devuelto (a lo de Lourdes)
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => setShowTransfer(!showTransfer)}
+                  className="rounded-lg border border-white/20 px-3 py-1 text-xs text-cream/80 hover:bg-white/5 disabled:opacity-50"
+                >
+                  Pasar directo a otra persona
+                </button>
+              </div>
+              {showTransfer && (
+                <div className="mt-1.5 flex gap-2">
+                  <select
+                    value={transferTo}
+                    onChange={(e) => setTransferTo(e.target.value)}
+                    className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
+                  >
+                    <option value="" className="bg-purple-deep">
+                      Traspasar a...
+                    </option>
+                    {users
+                      .filter((u) => u.id !== item.activeCustody?.holder?.id)
+                      .map((u) => (
+                        <option key={u.id} value={u.id} className="bg-purple-deep">
+                          {u.name}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    disabled={!transferTo || busy}
+                    onClick={() => {
+                      setBusy(true)
+                      transferStockCustody(item.activeCustody!.id, { holderUserId: transferTo })
+                        .then(() => {
+                          setShowTransfer(false)
+                          setTransferTo("")
+                          onChanged()
+                        })
+                        .catch((e) => onError(e.message))
+                        .finally(() => setBusy(false))
+                    }}
+                    className="rounded-lg bg-yellow px-3 py-1 text-xs font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+                  >
+                    Confirmar
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex gap-2">

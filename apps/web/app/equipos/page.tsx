@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { fetchMe, hasPermission, type SessionUser } from "../../lib/auth"
 import { Equipos } from "./tabs/Equipos"
 import { Zonas } from "./tabs/Zonas"
@@ -19,8 +19,11 @@ type TabKey = "equipos" | "zonas" | "presentismo" | "checkins" | "cocina" | "sto
  * /administracion: permiso field_ops.* para las primeras tres,
  * logistics.* para Cocina.
  */
+const TAB_KEYS: TabKey[] = ["equipos", "zonas", "presentismo", "checkins", "cocina", "stock"]
+
 export default function EquiposPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined)
   const [activeTab, setActiveTab] = useState<TabKey>("equipos")
 
@@ -30,6 +33,14 @@ export default function EquiposPage() {
       setUser(u)
     })
   }, [router])
+
+  // Permite linkear directo a una pestaña (?tab=cocina) desde otras
+  // pantallas — ej. el aviso de stock bajo y el widget "Te toca cocinar"
+  // del dashboard.
+  useEffect(() => {
+    const tab = searchParams.get("tab")
+    if (tab && (TAB_KEYS as string[]).includes(tab)) setActiveTab(tab as TabKey)
+  }, [searchParams])
 
   if (user === undefined) {
     return <p className="p-8 text-cream/60">Cargando...</p>

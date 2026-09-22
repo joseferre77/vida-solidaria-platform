@@ -102,6 +102,19 @@ export interface KitchenBatchAssigneeItem extends BasicUser {
   taskLabel: string | null
 }
 
+// Fase L — equipamiento reusable (conservadora, olla) sumado al kit de este
+// lote; cada fila es un préstamo (StockCustody) linkeado al lote.
+export interface KitchenBatchEquipmentItem {
+  custodyId: string
+  stockItemId: string
+  stockItemName: string
+  unit: string
+  quantity: number | string
+  holder: BasicUser | null
+  checkedOutAt: string
+  returnedAt: string | null
+}
+
 export interface KitchenBatchItem {
   id: string
   name: string
@@ -113,6 +126,7 @@ export interface KitchenBatchItem {
   ingredients: KitchenBatchIngredientItem[]
   assignees: KitchenBatchAssigneeItem[]
   statusHistory: { toStatus: KitchenBatchStatus; changedAt: string; changedBy: BasicUser | null }[]
+  equipment: KitchenBatchEquipmentItem[]
 }
 
 // ── Insumos ──
@@ -164,6 +178,14 @@ export const returnStockCustody = (custodyId: string, data?: { returnedNotes?: s
     body: JSON.stringify(data ?? {}),
   }) as Promise<StockItemItem>
 
+// Traspaso directo (ej. cocinero → despachador) en un solo paso, en vez de
+// devolver y después prestarle a la próxima persona.
+export const transferStockCustody = (custodyId: string, data: { holderUserId: string; notes?: string }) =>
+  apiFetch(`/api/stock-custody/${custodyId}/transfer`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<StockItemItem>
+
 export const getStockCustodyHistory = (id: string) =>
   apiFetch(`/api/stock-items/${id}/custody-history`) as Promise<StockCustodyHistoryItem[]>
 
@@ -201,3 +223,19 @@ export const addKitchenBatchAssignee = (id: string, data: { userId: string; task
 
 export const removeKitchenBatchAssignee = (id: string, userId: string) =>
   apiFetch(`/api/kitchen-batches/${id}/assignees/${userId}`, { method: "DELETE" }) as Promise<KitchenBatchItem>
+
+// Fase L — equipamiento del kit (armar en un solo paso desde Cocina, junto
+// a los insumos de arriba).
+export const addKitchenBatchEquipment = (
+  id: string,
+  data: { stockItemId: string; quantity?: number; holderUserId?: string; notes?: string },
+) => apiFetch(`/api/kitchen-batches/${id}/equipment`, { method: "POST", body: JSON.stringify(data) }) as Promise<
+  KitchenBatchItem
+>
+
+export const removeKitchenBatchEquipment = (id: string, custodyId: string) =>
+  apiFetch(`/api/kitchen-batches/${id}/equipment/${custodyId}`, { method: "DELETE" }) as Promise<KitchenBatchItem>
+
+// Fase L — "tablero del voluntario": mis lotes de cocina (soy responsable o
+// estoy asignado), para el widget del dashboard.
+export const listMyKitchenBatches = () => apiFetch("/api/kitchen-batches/mine") as Promise<KitchenBatchItem[]>

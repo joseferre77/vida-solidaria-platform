@@ -1009,10 +1009,18 @@ model StockCustody {
   checkedOutAt  DateTime  @default(now()) @map("checked_out_at")
   returnedAt    DateTime? @map("returned_at")
   returnedNotes String?   @map("returned_notes")
+  // Fase L — "Kit semanal": si este préstamo se armó como parte de un lote
+  // de cocina (conservadora/olla sumada junto con los insumos, "un solo
+  // paso desde Cocina"), queda linkeado acá. Permite mostrar el kit
+  // completo en el detalle del lote y en la vista personal del voluntario
+  // asignado, y sobrevive a un traspaso directo (cocinero → despachador).
+  batchId String? @map("batch_id")
 
-  stockItem StockItem @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+  stockItem StockItem     @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+  batch     KitchenBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@index([stockItemId])
+  @@index([batchId])
   @@map("stock_custody")
 }
 
@@ -1068,6 +1076,9 @@ model KitchenBatch {
   assignees     KitchenBatchAssignee[]
   statusHistory KitchenBatchStatusHistory[]
   checkins      Checkin[]
+  // Fase L — equipamiento reusable (conservadora, olla) sumado al kit de
+  // este lote; ver nota en StockCustody.batchId.
+  custodies     StockCustody[]
 
   @@map("kitchen_batches")
 }

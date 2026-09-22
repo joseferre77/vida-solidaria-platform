@@ -8,6 +8,7 @@ import {
   STOCK_UNIT_LABEL,
   STOCK_UNITS,
   addKitchenBatchAssignee,
+  addKitchenBatchEquipment,
   addKitchenBatchIngredient,
   createKitchenBatch,
   createStockItem,
@@ -15,8 +16,10 @@ import {
   listKitchenBatches,
   listStockItems,
   removeKitchenBatchAssignee,
+  removeKitchenBatchEquipment,
   removeKitchenBatchIngredient,
   setKitchenBatchResponsible,
+  transferStockCustody,
   updateKitchenBatchStatus,
   type KitchenBatchItem,
   type KitchenBatchStatus,
@@ -86,7 +89,8 @@ export function Cocina() {
             <p className="mt-1 text-xs text-cream/50">{b.targetServings} porciones objetivo</p>
             <p className="mt-2 text-xs text-cream/40">
               {b.assignees.length} {b.assignees.length === 1 ? "persona asignada" : "personas asignadas"} ·{" "}
-              {b.ingredients.length} {b.ingredients.length === 1 ? "insumo" : "insumos"}
+              {b.ingredients.length} {b.ingredients.length === 1 ? "insumo" : "insumos"} ·{" "}
+              {b.equipment.filter((e) => !e.returnedAt).length} equipamiento
             </p>
           </button>
         ))}
@@ -228,6 +232,11 @@ function BatchDetailModal({
   const [pickUserId, setPickUserId] = useState("")
   const [taskLabel, setTaskLabel] = useState("")
   const [showNewStock, setShowNewStock] = useState(false)
+  const [pickEquipId, setPickEquipId] = useState("")
+  const [equipQty, setEquipQty] = useState("1")
+  const [transferFor, setTransferFor] = useState<string | null>(null)
+  const [transferTo, setTransferTo] = useState("")
+  const [busyEquip, setBusyEquip] = useState(false)
 
   function refresh() {
     getKitchenBatch(batchId)
@@ -257,7 +266,13 @@ function BatchDetailModal({
     )
   }
 
-  const availableStock = stockItems.filter((s) => !batch.ingredients.some((i) => i.stockItemId === s.id))
+  const availableStock = stockItems.filter(
+    (s) => !s.isReusable && !batch.ingredients.some((i) => i.stockItemId === s.id),
+  )
+  const activeEquipment = batch.equipment.filter((e) => !e.returnedAt)
+  const availableEquipment = stockItems.filter(
+    (s) => s.isReusable && !activeEquipment.some((e) => e.stockItemId === s.id),
+  )
   const availableUsers = users.filter((u) => !batch.assignees.some((a) => a.id === u.id))
   const currentIdx = KITCHEN_STATUS_ORDER.indexOf(batch.status)
 
@@ -398,6 +413,129 @@ function BatchDetailModal({
             <button onClick={() => setShowNewStock(true)} className="mt-1.5 text-xs text-yellow hover:underline">
               + Insumo nuevo (no está en la lista)
             </button>
+          )}
+        </div>
+
+        {/* Equipamiento del kit (Fase L — conservadora/olla, junto con los
+            insumos de arriba: "armar kit en un solo paso desde Cocina") */}
+        <div className="mb-5">
+          <p className="mb-1.5 text-sm text-cream/70">Equipamiento (kit)</p>
+          <div className="mb-2 space-y-1">
+            {activeEquipment.map((e) => (
+              <div key={e.custodyId} className="rounded-lg bg-white/5 px-3 py-1.5 text-sm text-cream">
+                <div className="flex items-center justify-between gap-2">
+                  <span>
+                    {e.quantity} {e.stockItemName} — en manos de{" "}
+                    <span className="font-medium">{e.holder?.name ?? "—"}</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setTransferFor(transferFor === e.custodyId ? null : e.custodyId)}
+                      className="text-xs text-yellow hover:underline"
+                    >
+                      Pasar a...
+                    </button>
+                    <button
+                      disabled={busyEquip}
+                      onClick={() => {
+                        setBusyEquip(true)
+                        removeKitchenBatchEquipment(batch.id, e.custodyId)
+                          .then(refresh)
+                          .catch((err) => setError(err.message))
+                          .finally(() => setBusyEquip(false))
+                      }}
+                      className="text-cream/30 hover:text-orange"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                {transferFor === e.custodyId && (
+                  <div className="mt-1.5 flex gap-2">
+                    <select
+                      value={transferTo}
+                      onChange={(ev) => setTransferTo(ev.target.value)}
+                      className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
+                    >
+                      <option value="" className="bg-purple-deep">
+                        Traspasar directo a...
+                      </option>
+                      {users
+                        .filter((u) => u.id !== e.holder?.id)
+                        .map((u) => (
+                          <option key={u.id} value={u.id} className="bg-purple-deep">
+                            {u.name}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      disabled={!transferTo || busyEquip}
+                      onClick={() => {
+                        setBusyEquip(true)
+                        transferStockCustody(e.custodyId, { holderUserId: transferTo })
+                          .then(() => {
+                            setTransferFor(null)
+                            setTransferTo("")
+                            refresh()
+                          })
+                          .catch((err) => setError(err.message))
+                          .finally(() => setBusyEquip(false))
+                      }}
+                      className="rounded-lg bg-yellow px-3 py-1 text-xs font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+                    >
+                      Confirmar
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {activeEquipment.length === 0 && <p className="text-xs text-cream/40">Sin equipamiento en el kit</p>}
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={pickEquipId}
+              onChange={(e) => setPickEquipId(e.target.value)}
+              className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
+            >
+              <option value="" className="bg-purple-deep">
+                Elegir equipamiento...
+              </option>
+              {availableEquipment.map((s) => (
+                <option key={s.id} value={s.id} className="bg-purple-deep">
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={equipQty}
+              onChange={(e) => setEquipQty(e.target.value)}
+              placeholder="Cant."
+              className="w-16 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
+            />
+            <button
+              disabled={!pickEquipId || !equipQty || !batch.responsible}
+              title={!batch.responsible ? "Asigná un responsable arriba antes de sumar equipamiento" : undefined}
+              onClick={() => {
+                addKitchenBatchEquipment(batch.id, { stockItemId: pickEquipId, quantity: Number(equipQty) })
+                  .then(() => {
+                    setPickEquipId("")
+                    setEquipQty("1")
+                    refresh()
+                  })
+                  .catch((e) => setError(e.message))
+              }}
+              className="rounded-lg bg-yellow px-3 py-1.5 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+            >
+              +
+            </button>
+          </div>
+          {!batch.responsible && (
+            <p className="mt-1 text-[11px] text-cream/40">
+              Asigná un responsable arriba — el equipamiento del kit queda a su nombre.
+            </p>
           )}
         </div>
 
