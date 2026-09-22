@@ -6,14 +6,24 @@
 > (21/09/2026) a diseño técnico concreto, contrastado contra el schema y
 > las rutas YA existentes (no se repite trabajo hecho).
 >
-> ⚠️ **Pendiente de vos, para el final de Fase K** (así lo pediste — "dejamos
-> para el final de las implementaciones resend y el watchdog"): 1) crear la
-> cuenta de Resend y pasarme la `RESEND_API_KEY` — sin ella, todo lo que
-> manda email (alta de voluntarios de A, lo que sume D) funciona igual pero
-> ningún mail sale de verdad todavía (se loguea y se omite, sin romper nada
-> — ver `lib/email.ts`); 2) decidir qué hacer con el watchdog
+> ⚠️ **Pendiente de vos** (dos ítems — ver el mensaje del 22/09 abajo sobre
+> por qué son dos y no tres): 1) crear la cuenta de Resend y pasarme la
+> `RESEND_API_KEY` — sin ella, todo lo que manda email (alta de
+> voluntarios de A, lo que sume D) funciona igual pero ningún mail sale de
+> verdad todavía (se loguea y se omite, sin romper nada — ver
+> `lib/email.ts`); 2) decidir qué hacer con el watchdog
 > (`watchdog-deploy.sh`) que quedó corriendo por cron en el servidor desde
 > el incidente del 19-20/09 (ver `DEPLOY.md`).
+>
+> **Post-Fase-K (22/09/2026)** — ver bloque H más abajo: dashboard
+> corregido, `/analitica` ampliada (usuarios, proyectos, stock, mapa,
+> reportes CSV/PDF). Dos cosas del pedido de Josecito quedaron resueltas acá
+> con una decisión documentada porque el dato exacto no vino especificado:
+> el mapeo de color rojo/naranja/amarillo/verde (ver bloque H), y "estos
+> tres pendientes" — en este documento solo había DOS pendientes cargados
+> (Resend, watchdog) al momento del pedido; se sigue con esos dos, y si
+> Josecito tenía un tercero en mente que no llegó a este documento, que lo
+> diga y se agrega.
 
 ## Método
 
@@ -294,6 +304,93 @@ definitivas. `tsc` y `next build` limpios en ambas apps.
 
 ---
 
+## H) Post-Fase-K: dashboard, analítica ampliada, mapa de casos y reportes (NUEVO) 🚧 CONSTRUIDO Y VERIFICADO — pendiente de aplicar en producción (SSH caído de forma intermitente al momento de escribir esto, 22/09/2026 madrugada)
+
+Pedido de Josecito del 21/09 a la noche, ya con toda Fase K en producción:
+corregir las tarjetas "próximamente" del dashboard, sumar más KPI/gráficos a
+`/analitica`, agregar un mapa interactivo de casos y agregar exportación de
+reportes CSV/PDF. Sin migración — todo agregación sobre tablas existentes.
+
+**Dashboard (`/dashboard`)**: "Analítica" ya no es "próximamente" — apunta a
+`/analitica` (tenía funcionalidad real desde el bloque G, la tarjeta había
+quedado desactualizada). Además se sacaron las tarjetas "Logística" y
+"Operaciones de Campo": ambas estaban marcadas "próximamente" pero en
+realidad viven, desde los bloques B/C, como pestañas dentro de "Equipos y
+Secciones" (Cocina/Stock y Equipos/Zonas/Presentismo/Check-ins
+respectivamente) — tener el mismo módulo dos veces, una de ellas mintiendo
+que no existe, era peor que no tenerla. "Finanzas" sigue como
+"próximamente": no tiene todavía ninguna pantalla propia.
+
+**`/analitica` — KPI y gráficos nuevos**:
+- `GET /api/analytics/resumen`: usuarios totales, proyectos por estado
+  (planificación/en proceso/pausado/terminado, sale de `groupBy` sobre
+  `Project.status`), y stock (ítems cargados, valuación total, cantidad
+  bajo punto de pedido) — calculado en lote con `groupBy` sobre
+  `StockMovement` en vez de reusar el cálculo por-ítem de
+  `logistics.routes.ts` (ese es N+1 a propósito, porque ahí sí hay
+  paginado/filtro; acá no). Sale en 0 sin romperse si todavía no se cargó
+  ningún `StockItem` (pedido explícito: "aunque no esté cargado").
+- `casos.byStatus` sumado a `GET /api/analytics/casos` — cuenta de casos
+  por los 4 valores de `CaseStatus`, graficado como torta en `/analitica`
+  con los mismos colores que el mapa (ver abajo) para que se lean como la
+  misma clasificación.
+- Torta de proyectos por estado.
+
+**Mapa de casos** (`GET /api/analytics/mapa-casos` + `CasosMap.tsx`,
+`react-leaflet` + `leaflet`, tiles de OpenStreetMap — sin API key, sin
+costo): un pin por caso en su ubicación GPS más reciente (`CaseLocation`,
+puede haber varias por caso a lo largo del tiempo; se toma la de
+`recordedAt` más nuevo). Tocar un pin (o el botón del popup) navega a
+`/casos?caseId=<id>` — se le sumó a `app/casos/page.tsx` la lectura de ese
+query param (antes `Listado` solo sabía abrir un caso puntual por estado de
+React, dentro de la misma página; ahora también desde afuera, vía URL).
+
+**Mapeo de color — decisión documentada** (Josecito no dio el campo exacto,
+solo describió 4 categorías): se reusa el único campo de 4 valores que
+tiene `Case`, el propio `status` (`CaseStatus`):
+- `activo` (recién cargado) → **rojo** — "sin clasificación".
+- `derivado` → **naranja** — "clasificados".
+- `en_seguimiento` → **amarillo** — "en tratamiento / otro filtro".
+- `cerrado` → **verde** — "extraídos" (la persona salió de la situación de
+  calle, el caso se cerró).
+
+Si esto no es lo que tenías en mente (por ejemplo si "clasificación" debía
+ser un campo nuevo, separado de `status`), avisame y se ajusta — es un
+campo booleano/enum chico de agregar, no una migración grande.
+
+**Reportes** (sección nueva al final de `/analitica`, 4 filas × 2 botones
+cada una = 8 botones: CSV y PDF por reporte):
+- `GET /api/analytics/export/casos`, `.../export/cocina`,
+  `.../export/proyectos` (listados planos, sin paginar, bajo
+  `analytics.read` — no bajo `logistics.read`/`finance.read`, a propósito:
+  así dirección puede exportar todo desde un solo lugar sin necesitar
+  permisos de módulos operativos). "Reporte general" no tiene endpoint
+  propio — se arma en el frontend combinando lo que la propia página ya
+  tiene cargado (casos + resumen + presentismo + producción).
+- CSV: delimitador `;` (no `,`) + BOM UTF-8 — Excel en configuración
+  regional Argentina toma `;` como separador de lista nativo al abrir con
+  doble clic (con `,` mete todo en una sola columna, por el separador
+  decimal). `apps/web/lib/reports.ts`, sin librería — solo `Blob` +
+  descarga.
+- PDF: `jspdf` + `jspdf-autotable` (nuevas dependencias, antes no había
+  ninguna generación de PDF en el proyecto), franja violeta con logo +
+  "Vida Solidaria MDP" + título del reporte en el header de cada página,
+  pie con fecha de generación + número de página — todo client-side, sin
+  endpoint de "generar reporte" en el backend.
+
+**Verificación antes de tocar producción**: sin migración (ninguna tabla
+nueva; las 11 migraciones existentes se re-aplicaron limpias contra una
+base Postgres local vacía, confirmando que no hay drift de schema) —
+script funcional (`test_post_fase_k.js`) contra Postgres local + API real
+corriendo, con datos sembrados a mano: 25 verificaciones (resumen con
+stock bajo punto de pedido, mapa tomando la ubicación MÁS reciente de un
+caso con varias cargadas, labels en español de los exports, 401 sin
+sesión, etc.) — las 25 pasaron. `tsc` y `next build` limpios en ambas
+apps, incluyendo el chunk nuevo de `/analitica` (237 kB, sube por
+leaflet+jspdf — esperable, es la única página que los usa).
+
+---
+
 ## Decisiones ya tomadas (de tus respuestas de hoy)
 
 - Email transaccional: **Resend**.
@@ -330,3 +427,9 @@ cerrado" a efectos del email) se resolvió al construir D: `CaseStatus.cerrado`
 
 **Con esto, Fase K queda completa** salvo los dos pendientes explícitos de
 Josecito (Resend y watchdog, ver el aviso al principio de este documento).
+
+7. **H (post-Fase-K: dashboard, analítica ampliada, mapa, reportes)** —
+   construido y verificado el 22/09/2026, **pendiente de aplicar en
+   producción** (bloqueado por una caída intermitente de SSH al servidor —
+   ver bloque H arriba; el sitio en sí sigue arriba y sano, solo el canal
+   de deploy está afectado).

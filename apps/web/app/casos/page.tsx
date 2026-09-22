@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { fetchMe, hasPermission, type SessionUser } from "../../lib/auth"
 import { NuevoCaso } from "./NuevoCaso"
 import { Listado } from "./Listado"
@@ -17,11 +17,15 @@ type TabKey = "nuevo" | "listado"
  */
 export default function CasosPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined)
   const [activeTab, setActiveTab] = useState<TabKey>("nuevo")
   const [lastCreatedCaseNumber, setLastCreatedCaseNumber] = useState<string | null>(null)
   // Bloque E: cuando el buscador anti-duplicados de "Nuevo caso" encuentra
   // una coincidencia, se navega directo a ese caso existente en el listado.
+  // Post-Fase-K: mismo mecanismo, pero llegando desde afuera de esta
+  // página (el mapa de /analitica) vía ?caseId=<id> en la URL — el estado
+  // de React no sirve para eso, hace falta leer el query param.
   const [openCaseId, setOpenCaseId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -30,6 +34,15 @@ export default function CasosPage() {
       setUser(u)
     })
   }, [router])
+
+  useEffect(() => {
+    const caseId = searchParams.get("caseId")
+    if (caseId) {
+      setOpenCaseId(caseId)
+      setActiveTab("listado")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   if (user === undefined) {
     return <p className="p-8 text-cream/60">Cargando...</p>

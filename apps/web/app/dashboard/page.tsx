@@ -149,17 +149,17 @@ export default function DashboardPage() {
         <RoleGate user={user ?? null} permission="cases.read">
           <NavCard label="Casos" href="/casos" />
         </RoleGate>
-        <RoleGate user={user ?? null} permission="logistics.read">
-          <NavCard label="Logística" disabled />
-        </RoleGate>
-        <RoleGate user={user ?? null} permission="field_ops.read">
-          <NavCard label="Operaciones de Campo" disabled />
-        </RoleGate>
+        {/* "Logística" y "Operaciones de Campo" ya NO son placeholders
+            propios acá — ambas viven como pestañas dentro de "Equipos y
+            Secciones" (Cocina/Stock y Equipos/Zonas/Presentismo/Check-ins
+            respectivamente, ver app/equipos/page.tsx) desde los bloques B/C
+            de Fase K. Tener además una tarjeta "próximamente" repetía el
+            mismo módulo dos veces y una de las dos siempre mentía. */}
         <RoleGate user={user ?? null} permission="finance.read">
           <NavCard label="Finanzas" disabled />
         </RoleGate>
         <RoleGate user={user ?? null} permission="analytics.read">
-          <NavCard label="Analítica" disabled />
+          <NavCard label="Analítica" href="/analitica" />
         </RoleGate>
         {(hasPermission(user ?? null, "field_ops.read") || hasPermission(user ?? null, "logistics.read")) && (
           <NavCard label="Equipos y Secciones" href="/equipos" />
