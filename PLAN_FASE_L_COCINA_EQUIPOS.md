@@ -303,3 +303,93 @@ igual de urgentes.
 3. **Vencimientos por lote**: ¿es necesario para esta fase o lo dejamos para L.2? (afecta a insumos como leche en polvo, conservas — no a lo que se cocina el mismo día).
 4. **Chat de coordinadores**: ¿lo arrancamos ya o esperamos a que haya más de un coordinador activo por área además de vos?
 5. **Jerarquía plana por equipo** (punto 7): ¿confirmás que alcanza por ahora, sin sub-jefes dentro de un equipo?
+
+---
+
+## 13) Corrección honesta + estado real después de la reunión (22-23/09/2026)
+
+Antes de nada, una corrección que te debo: al escribir este documento **no
+revisé primero si algo de esto ya existía en el código** — y gran parte SÍ
+existía, de una fase anterior (lo que acá llamo "Fase K") que ya había
+construido buena parte del modelo de datos que describo arriba: stock de
+consumibles vs. reutilizables con custodia (`StockItem`/`StockCustody`/
+`StockMovement`), estados de cocina (`KitchenBatch` y sus 6 etapas),
+Equipos (`FieldTeam`/`FieldTeamMember`), confirmación semanal
+(`WeeklyAvailability`), Zonas y el semáforo de check-ins
+(`Checkin` con los mismos 6 tipos que describo en el punto de
+"semáforo"). Lo que faltaba no era construir todo esto de cero — era
+**wirear/extender** lo que ya estaba, más lo puntual que pediste en tus
+respuestas. Te lo aclaro para que sepas que el trabajo real fue más
+acotado de lo que este documento hacía parecer.
+
+### Tus 5 respuestas, implementadas
+
+1. **Confirmación semanal, ¿viernes o sábado?** → Viernes (te daba la
+   opción, elegí viernes: deja todo el fin de semana para armar equipos
+   antes del domingo). Ya está andando — ver punto "avisos programados"
+   abajo.
+2. **Reutilizables como stock fijo/patrimonio** → Confirmado, no se tocó
+   nada nuevo: el `isReusable` que ya existía en el catálogo de stock
+   alcanza para esto.
+3. **Vencimientos** → Quedan afuera de esta fase, como pediste.
+4. **Alta de usuario más completa** (14 coordinadores reales no estaban
+   cargados) → Implementado: el formulario de alta/edición de usuario
+   (pestaña Administración → Usuarios) ahora tiene foto de perfil, CV
+   adjunto, domicilio, teléfono alternativo, fecha de nacimiento, sexo,
+   habilidades, días y horarios disponibles. Todo opcional — el alta
+   rápida de siempre (nombre + email + rol) sigue andando igual.
+5. **Sin sub-jefes** → Confirmado. Cada equipo tiene un solo coordinador
+   (`coordinatorUserId`, editable desde la pestaña Equipos) y cada
+   integrante puede tener una o más funciones (relevo, extracción,
+   despacho de comida/bebida/infusión, general) en vez de un segundo
+   nivel de jerarquía.
+
+### Los 3 bugs que reportaste en el P.D.
+
+- **"Agrego integrantes desde el caso/proyecto y no se reflejan"** →
+  Causa real: la función para agregar/quitar miembros de un proyecto
+  existía en el backend desde antes, pero **ningún lado del frontend la
+  llamaba** — no es que no se reflejara, es que nunca se llegaba a crear.
+  Arreglado: Vista General de un proyecto ahora tiene el selector para
+  agregar integrantes (con su rol) y un botón para quitarlos.
+- **"Los avisos programados no están funcionando"** → Causa real: existía
+  el campo para marcar un recordatorio como "ya avisado"
+  (`Reminder.notifiedAt`) pero nada lo leía para efectivamente mandar el
+  aviso — se guardaban y quedaban ahí para siempre, sin disparar nada.
+  Arreglado: un chequeo cada 5 minutos, adentro del mismo proceso de la
+  API (sin sumar servicios ni procesos nuevos al hosting — justo hoy
+  pegamos contra el límite de procesos de la cuenta, así que evité
+  agregar más), que manda el recordatorio cuando vence Y el aviso
+  semanal de "¿venís el domingo?" los viernes.
+- **"Los procesos no se pueden eliminar, solo agregar"** → Revisé a fondo
+  el endpoint de borrado, el control de acceso y la cascada en la base —
+  no encontré ninguna asimetría entre crear y borrar; debería funcionar.
+  No pude reproducir una falla real. Lo que sí hice: si vuelve a fallar,
+  ahora la pantalla te va a mostrar el mensaje de error real en vez de
+  fallar en silencio (antes no tenía manejo de error). Si te vuelve a
+  pasar, contame el mensaje exacto que aparece y lo sigo desde ahí — puede
+  ser un caso puntual (permisos, un proceso con tareas en un estado
+  particular) que todavía no vi.
+
+### Lo que quedó afuera de esta sesión
+
+- **Chat de coordinadores** (los 3 canales del punto 9 del documento): no
+  se tocó. Es la pieza más grande que falta del diseño original y
+  conviene encararla como su propio bloque, no apurada al final de una
+  sesión ya larga.
+- **Kit de cocina semanal con descuento automático de stock** (punto 3 del
+  diseño): el modelo de datos ya existe (`KitchenBatch` y afines de Fase
+  K), pero no se tocó nada nuevo acá — si hace falta ajustar el flujo de
+  asignación, es la siguiente pieza natural a mirar.
+
+### Qué está en producción ahora mismo
+
+Todo lo de "Tus 5 respuestas, implementadas" y "Los 3 bugs" de arriba está
+desplegado y verificado en `gestion.vidasolidariamdp.com` /
+`api.vidasolidariamdp.com` (incluida la migración de base de datos). Nota
+técnica para el próximo despliegue: `prisma migrate deploy` por SSH está
+fallando en este hosting con un panic de conexión ("timer has gone away")
+en procesos lanzados ad-hoc — la solución que quedó andando es que la
+propia API aplica las migraciones pendientes al arrancar
+(`ensure-migrations.ts`), así que un `touch tmp/restart.txt` alcanza para
+que una migración nueva se aplique sola.
