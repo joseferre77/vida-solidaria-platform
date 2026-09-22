@@ -248,7 +248,18 @@ function CasosSlider({ cases, onOpen }: { cases: CaseListItem[]; onOpen: (id: st
     if (Math.abs(dx) > 6) st.moved = true
     el.scrollLeft = st.startScroll - dx
   }
-  function endDrag() {
+  function endDrag(e: React.PointerEvent<HTMLDivElement>) {
+    // Crítico: hay que soltar la captura del puntero ANTES de que el
+    // navegador dispare el "click" sintético post-pointerup. Si sigue
+    // capturado en el div contenedor, Chrome/Edge en desktop retargetean
+    // ese click al propio div (no desciende al <button> de la tarjeta),
+    // así que el tap "sin arrastre" nunca abre el caso con mouse — aunque
+    // sí funciona con touch, porque ahí nunca se llama a
+    // setPointerCapture (ver onPointerDown).
+    const el = trackRef.current
+    if (el?.hasPointerCapture(e.pointerId)) {
+      el.releasePointerCapture(e.pointerId)
+    }
     drag.current = null
   }
 
