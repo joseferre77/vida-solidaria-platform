@@ -433,7 +433,7 @@ Nota técnica: se agregó `StockCustody.batchId` (nullable, migración
 préstamo de equipamiento a un lote de cocina sin tocar el ledger de
 `StockMovement` (que sigue siendo exclusivo de lo que se consume).
 
-### Lo que sigue quedando afuera
+### Lo que sigue quedando afuera (al cierre del bloque 14)
 
 - **Chat de coordinadores**: sigue sin tocar, es la pieza más grande que
   falta.
@@ -445,3 +445,82 @@ préstamo de equipamiento a un lote de cocina sin tocar el ledger de
   que me cuentes puntualmente qué te falta ver ahí, porque lo que
   encontré en el código ya cubre catálogo + código automático + categoría
   + costo + punto de pedido).
+
+## 15) Fase M — Chat de coordinadores + rediseño según manual de marca (23/09/2026)
+
+Pediste dos cosas juntas: el chat de coordinadores que venía quedando
+afuera desde el bloque anterior, y aplicar el look and feel de la
+plataforma al manual de identidad oficial que subiste
+(`Manual_de_identidad_Vida_Solidaria.pdf` v1.0 + el kit de gráficos en
+`.rar`).
+
+**Chat de coordinadores** — un solo canal interno (elegiste "un solo
+canal simple" en vez del diseño original de 3 canales), visible solo
+para coordinación/administración (los voluntarios no tienen el permiso
+`coordination.chat`, elegiste esa opción explícitamente). Se actualiza
+por polling cada 6 segundos (no hay Socket.IO integrado todavía).
+Entrás desde el ítem "Chat" del menú lateral → `/coordinacion`.
+Desplegado y verificado en producción (API + web), y sincronizado con el
+repo (commit `b88aaff`).
+
+Nota técnica: se agregó `ensure-permissions.ts`, que siembra
+roles/permissions/role_permissions al arrancar el proceso — mismo motivo
+que `ensure-migrations.ts` (un script suelto por SSH panickea con "timer
+has gone away" en este hosting). Así que sumar un permiso nuevo en el
+futuro no requiere correr `prisma/seed.ts` a mano: alcanza con
+desplegar el código y reiniciar.
+
+**Rediseño de marca (preview, no completo todavía)** — leí el manual
+completo: colores oficiales (Violeta Vida, Amarillo Esperanza, Azul Mar
+como primarios; Magenta Solidaria, Naranja Cercanía, Celeste Espuma,
+Papel y Tinta como secundarios/neutros), tipografías Outfit (títulos) +
+Work Sans (texto), sin degradados fuera del logo, botones con esquinas
+rectas, íconos de línea (nunca emojis). El manual pide fondos claros
+"por legibilidad al sol de la peatonal" — lo cual chocaba de frente con
+el tema oscuro que tiene hoy toda la plataforma. Te consulté ese punto
+específico y elegiste ir a fondo con el modo claro fiel al manual.
+
+Por ahora el rediseño se aplicó solo como **preview** en el header/nav
+(AppShell) y en Login, para que lo veas antes de tocar el resto de las
+pantallas — quedó pendiente tu confirmación para extenderlo a
+dashboard, casos, proyectos, equipos, administración, analítica y
+presentismo (es un cambio grande, mejor de a bloques como venimos
+haciendo).
+
+Durante el preview aparecieron dos bugs de contraste que reportaste y
+ya están arreglados y en producción:
+1. El `<body>` global había quedado con fondo claro, y como el resto de
+   pantallas todavía usa texto claro (pensado para el fondo oscuro
+   original), quedó texto claro sobre fondo claro en toda la app. Se
+   revirtió el fondo del body al degradado oscuro original — el modo
+   claro por ahora vive solo en AppShell y Login, que ya traen su propio
+   fondo.
+2. En Windows, Chrome no respeta el `background-color` que le pusimos a
+   los `<option>` de los desplegables y cae al render nativo claro del
+   sistema — como el texto seguía siendo claro, quedaba invisible. Se
+   forzó fondo claro + texto oscuro explícitos en los 70 `<option>` de
+   la app, así se ve bien caiga o no en el estilo custom.
+
+Todo esto — chat + branding + los dos hotfixes — está desplegado en
+producción y sincronizado con el repo (commits `e883c11`, `ab169b4`,
+`b88aaff`).
+
+### Pendiente explícito (dijiste "revisá después")
+
+- **Stock lento / no carga**: reportaste que algo quedó mal después de
+  los cambios recientes. Hice una primera pasada por los logs del
+  servidor y no encontré errores evidentes — falta que me cuentes en
+  qué momento pasa (¿al abrir la pestaña? ¿al cargar un movimiento
+  puntual?) o, si podés, una captura del momento en que se cuelga, para
+  reproducirlo puntualmente.
+
+### Lo que sigue quedando afuera
+
+- **Rediseño de marca completo**: falta el resto de las pantallas
+  (dashboard, casos, proyectos, equipos, administración, analítica,
+  presentismo) — a la espera de tu OK sobre el preview.
+- **Vista semáforo en vivo agrupada**, **día/hora/punto de encuentro
+  configurable**, **aviso automático "buenos días" el día del evento**,
+  **KPI de usuario más activo**, **ampliación de Stock** y
+  **catalogación completa de Stock** — mismos ítems del bloque anterior,
+  todavía sin definir con vos.
