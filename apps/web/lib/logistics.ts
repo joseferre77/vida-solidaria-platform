@@ -47,6 +47,7 @@ export interface StockItemItem {
   name: string
   unit: StockUnit
   category: string | null
+  icon: string | null
   isReusable: boolean
   unitCost: number | null
   reorderPoint: number | null
@@ -63,6 +64,26 @@ export interface StockSummary {
   totalValuation: number
   belowReorderPoint: number
   reusableOnLoan: number
+}
+
+// Bloque "Stock — historial de movimientos unificado" y "Alertas de stock"
+export interface StockMovementWithItem extends StockMovementItem {
+  stockItem: { id: string; name: string; code: string; unit: string }
+}
+
+export interface StockMovementsReport {
+  summary: {
+    totalIngresos: number
+    totalEgresos: number
+    count: number
+    distinctItems: number
+  }
+  movements: StockMovementWithItem[]
+}
+
+export interface StockAlerts {
+  sinStock: StockItemItem[]
+  bajo: StockItemItem[]
 }
 
 export type KitchenBatchStatus =
@@ -138,10 +159,14 @@ export const createStockItem = (data: {
   name: string
   unit: StockUnit
   category?: string
+  icon?: string
   isReusable?: boolean
   unitCost?: number
   reorderPoint?: number
   restockTarget?: number
+  // Cantidad inicial al crear — dispara el primer ingreso solo (ver
+  // logistics.routes.ts). Se ignora si isReusable.
+  initialQuantity?: number
 }) => apiFetch("/api/stock-items", { method: "POST", body: JSON.stringify(data) }) as Promise<StockItemItem>
 
 export const updateStockItem = (
@@ -150,6 +175,7 @@ export const updateStockItem = (
     name: string
     unit: StockUnit
     category: string
+    icon: string
     isReusable: boolean
     unitCost: number
     reorderPoint: number
@@ -167,6 +193,27 @@ export const createStockMovement = (
   id: string,
   data: { type: "ingreso" | "egreso"; quantity: number; reason?: string },
 ) => apiFetch(`/api/stock-items/${id}/movements`, { method: "POST", body: JSON.stringify(data) }) as Promise<StockItemItem>
+
+// Historial de movimientos unificado (todos los insumos juntos, filtrable)
+export const listAllStockMovements = (filters?: {
+  dateFrom?: string
+  dateTo?: string
+  type?: "ingreso" | "egreso"
+  createdBy?: string
+  search?: string
+}) => {
+  const params = new URLSearchParams()
+  if (filters?.dateFrom) params.set("dateFrom", filters.dateFrom)
+  if (filters?.dateTo) params.set("dateTo", filters.dateTo)
+  if (filters?.type) params.set("type", filters.type)
+  if (filters?.createdBy) params.set("createdBy", filters.createdBy)
+  if (filters?.search) params.set("search", filters.search)
+  const qs = params.toString()
+  return apiFetch(`/api/stock-movements${qs ? `?${qs}` : ""}`) as Promise<StockMovementsReport>
+}
+
+// Alertas de stock (sin stock / bajo punto de pedido)
+export const getStockAlerts = () => apiFetch("/api/stock-alerts") as Promise<StockAlerts>
 
 // ── Custodia de equipamiento reusable (conservadoras, termos, ollas...) ──
 export const checkOutStockItem = (id: string, data: { holderUserId: string; quantity?: number; notes?: string }) =>

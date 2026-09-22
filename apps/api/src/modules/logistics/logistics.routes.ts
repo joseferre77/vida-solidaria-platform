@@ -41,10 +41,16 @@ const stockItemSchema = z.object({
   name: z.string().min(2, "El nombre es obligatorio"),
   unit: z.enum(STOCK_UNITS),
   category: z.string().trim().optional(),
+  icon: z.string().trim().max(8).optional(),
   isReusable: z.boolean().optional(),
   unitCost: z.number().nonnegative().optional(),
   reorderPoint: z.number().nonnegative().optional(),
   restockTarget: z.number().nonnegative().optional(),
+  // Bloque "Stock — cantidad inicial al crear": solo se usa en el alta
+  // (POST /stock-items) — dispara un StockMovement de ingreso automático
+  // en vez de obligar a crear el insumo y después ir a "+ Movimiento"
+  // aparte. Se ignora en PATCH (la cantidad siempre sale del ledger).
+  initialQuantity: z.number().nonnegative().optional(),
 })
 
 const movementSchema = z.object({
@@ -245,6 +251,7 @@ async function serializeStockItem(item: {
   name: string
   unit: string
   category: string | null
+  icon: string | null
   isReusable: boolean
   unitCost: unknown
   reorderPoint: unknown
@@ -263,6 +270,7 @@ async function serializeStockItem(item: {
     name: item.name,
     unit: item.unit,
     category: item.category,
+    icon: item.icon,
     isReusable: item.isReusable,
     unitCost,
     reorderPoint,
@@ -313,6 +321,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         name: body.name,
         unit: body.unit,
         category: body.category || null,
+        icon: body.icon || null,
         isReusable: body.isReusable ?? false,
         unitCost: body.unitCost,
         reorderPoint: body.reorderPoint,
@@ -320,12 +329,32 @@ export async function logisticsRoutes(app: FastifyInstance) {
       },
       include: STOCK_ITEM_INCLUDE,
     })
+    // Bloque "Stock — cantidad inicial al crear": si vino con existencia de
+    // arranque (y no es equipamiento reusable, que no usa el ledger), se
+    // registra como el primer ingreso — evita el paso extra de crear el
+    // insumo y después ir a "+ Movimiento" a cargar lo mismo.
+    if (!item.isReusable && body.initialQuantity && body.initialQuantity > 0) {
+      await prisma.stockMovement.create({
+        data: {
+          stockItemId: item.id,
+          type: "ingreso",
+          quantity: body.initialQuantity,
+          reason: "Existencia inicial",
+          createdBy: request.user!.sub,
+        },
+      })
+    }
     return reply.code(201).send(await serializeStockItem(item))
   })
 
   app.patch("/stock-items/:id", { preHandler: [requireAuth, requirePermission("logistics.write")] }, async (request) => {
     const { id } = request.params as { id: string }
-    const body = stockItemSchema.partial().parse(request.body)
+    const { initialQuantity: _ignored, ...rest } = stockItemSchema.partial().parse(request.body)
+    const body = {
+      ...rest,
+      category: rest.category === undefined ? undefined : rest.category || null,
+      icon: rest.icon === undefined ? undefined : rest.icon || null,
+    }
     const item = await prisma.stockItem.update({ where: { id }, data: body, include: STOCK_ITEM_INCLUDE })
     return serializeStockItem(item)
   })
@@ -337,6 +366,85 @@ export async function logisticsRoutes(app: FastifyInstance) {
       const { id } = request.params as { id: string }
       await prisma.stockItem.delete({ where: { id } })
       return reply.code(204).send()
+    },
+  )
+
+  // Bloque "Stock — reporte y alertas": insumos sin stock o bajo punto de
+  // pedido, para una pantalla dedicada en vez de que la única señal sea el
+  // email de maybeAlertLowStock. No persiste un historial de alertas
+  // (abierta/resuelta) todavía — se calcula en vivo desde la cantidad
+  // actual; si más adelante hace falta rastrear "quién resolvió cuál y
+  // cuándo" hay que sumar un modelo propio.
+  app.get("/stock-alerts", { preHandler: [requireAuth, requirePermission("logistics.read")] }, async () => {
+    const items = await prisma.stockItem.findMany({ where: { isReusable: false }, include: STOCK_ITEM_INCLUDE })
+    const serialized = await Promise.all(items.map(serializeStockItem))
+    return {
+      sinStock: serialized.filter((i) => (i.currentQuantity ?? 0) <= 0),
+      bajo: serialized.filter((i) => i.belowReorderPoint && (i.currentQuantity ?? 0) > 0),
+    }
+  })
+
+  // Bloque "Stock — historial de movimientos unificado": antes el
+  // historial solo se veía insumo por insumo ("Ver historial" adentro de
+  // cada tarjeta) — acá se ven todos los movimientos juntos, filtrables
+  // por fecha/tipo/responsable/búsqueda, para auditar una semana entera.
+  app.get(
+    "/stock-movements",
+    { preHandler: [requireAuth, requirePermission("logistics.read")] },
+    async (request) => {
+      const query = z
+        .object({
+          dateFrom: z.string().optional(),
+          dateTo: z.string().optional(),
+          type: z.enum(["ingreso", "egreso"]).optional(),
+          createdBy: z.string().uuid().optional(),
+          search: z.string().trim().optional(),
+        })
+        .parse(request.query)
+
+      const movements = await prisma.stockMovement.findMany({
+        where: {
+          type: query.type,
+          createdBy: query.createdBy,
+          createdAt: {
+            gte: query.dateFrom ? new Date(query.dateFrom) : undefined,
+            lte: query.dateTo ? new Date(`${query.dateTo}T23:59:59.999Z`) : undefined,
+          },
+        },
+        include: { stockItem: { select: { id: true, name: true, code: true, unit: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 500,
+      })
+
+      const search = query.search?.toLowerCase()
+      const filtered = search
+        ? movements.filter(
+            (m) =>
+              m.stockItem.name.toLowerCase().includes(search) ||
+              m.stockItem.code.toLowerCase().includes(search) ||
+              (m.reason ?? "").toLowerCase().includes(search),
+          )
+        : movements
+
+      const users = await userMapFor(filtered.map((m) => m.createdBy))
+      return {
+        summary: {
+          totalIngresos: filtered.filter((m) => m.type === "ingreso").reduce((s, m) => s + Number(m.quantity), 0),
+          totalEgresos: filtered.filter((m) => m.type === "egreso").reduce((s, m) => s + Number(m.quantity), 0),
+          count: filtered.length,
+          distinctItems: new Set(filtered.map((m) => m.stockItemId)).size,
+        },
+        movements: filtered.map((m) => ({
+          id: m.id,
+          type: m.type,
+          quantity: m.quantity,
+          reason: m.reason,
+          relatedEntityType: m.relatedEntityType,
+          stockItem: { id: m.stockItem.id, name: m.stockItem.name, code: m.stockItem.code, unit: m.stockItem.unit },
+          createdBy: users.get(m.createdBy) ?? null,
+          createdAt: m.createdAt,
+        })),
+      }
     },
   )
 

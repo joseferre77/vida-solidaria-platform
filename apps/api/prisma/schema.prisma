@@ -970,6 +970,10 @@ model StockItem {
   name String
   unit StockUnit
   category String?
+  // Bloque "Stock — reporte y grilla visual": ícono/emoji para mostrar el
+  // insumo como tarjeta (vista rápida tipo TPV) — opcional, puramente
+  // visual, no reemplaza a category.
+  icon String?
   // Fase K: distingue insumos que se consumen (materia prima, descartables)
   // de equipamiento que se PRESTA y vuelve (conservadoras, termos, ollas,
   // cucharones) — este último no se mueve por StockMovement, se rastrea por
