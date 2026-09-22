@@ -109,11 +109,11 @@ export function Equipos() {
                 }}
                 className="rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
               >
-                <option value="" className="bg-purple-deep">
+                <option value="" className="bg-papel text-tinta">
                   Sin asignar
                 </option>
                 {users.map((u) => (
-                  <option key={u.id} value={u.id} className="bg-purple-deep">
+                  <option key={u.id} value={u.id} className="bg-papel text-tinta">
                     {u.name}
                   </option>
                 ))}
@@ -234,11 +234,11 @@ function NewTeamModal({
             onChange={(e) => setCoordinatorUserId(e.target.value)}
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
           >
-            <option value="" className="bg-purple-deep">
+            <option value="" className="bg-papel text-tinta">
               Sin asignar
             </option>
             {allUsers.map((u) => (
-              <option key={u.id} value={u.id} className="bg-purple-deep">
+              <option key={u.id} value={u.id} className="bg-papel text-tinta">
                 {u.name}
               </option>
             ))}
@@ -337,11 +337,11 @@ function MembersModal({
               onChange={(e) => setPickUserId(e.target.value)}
               className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow"
             >
-              <option value="" className="bg-purple-deep">
+              <option value="" className="bg-papel text-tinta">
                 Elegir persona...
               </option>
               {available.map((u) => (
-                <option key={u.id} value={u.id} className="bg-purple-deep">
+                <option key={u.id} value={u.id} className="bg-papel text-tinta">
                   {u.name}
                 </option>
               ))}

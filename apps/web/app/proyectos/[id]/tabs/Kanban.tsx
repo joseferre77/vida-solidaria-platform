@@ -37,11 +37,11 @@ export function Kanban({
             onChange={(e) => setProcessFilter(e.target.value)}
             className="rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
           >
-            <option value="" className="bg-purple-deep">
+            <option value="" className="bg-papel text-tinta">
               Todos
             </option>
             {processes.map((p) => (
-              <option key={p.id} value={p.id} className="bg-purple-deep">
+              <option key={p.id} value={p.id} className="bg-papel text-tinta">
                 {p.name}
               </option>
             ))}

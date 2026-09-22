@@ -9,22 +9,33 @@
  * COLOR) y define "Papel" (#F7F4F8) como fondo neutro de fichas y tablas,
  * con "Tinta" (#2A1030, nunca negro puro) para todo el texto de lectura.
  * También justifica esto por legibilidad al sol en la calle — el motivo
- * por el que se reemplaza acá el degradado violeta oscuro que tenía la
- * app hasta ahora (heredado de la landing de lanzamiento, antes de que
- * existiera este manual).
+ * por el que el plan es reemplazar acá el degradado violeta oscuro que
+ * tenía la app hasta ahora (heredado de la landing de lanzamiento, antes
+ * de que existiera este manual).
+ *
+ * OJO — por qué el <body> TODAVÍA no es claro: casi todas las pantallas
+ * de la app (Dashboard, Casos, Proyectos, Equipos, Administración,
+ * Analítica, Presentismo) están escritas con clases pensadas para el
+ * fondo oscuro anterior (text-cream, bg-white/5, border-white/10,
+ * bg-black/25...). Poner acá el body en claro las rompe TODAS de un saque
+ * — texto claro sobre fondo claro, ilegible — porque ninguna de esas
+ * pantallas define su propio fondo, heredan el del body. AppShell.tsx y
+ * app/login/page.tsx SÍ ya están rehechos para el tema claro (definen su
+ * propio bg-papel/text-tinta en su contenedor raíz, no dependen del
+ * body), así que se ven bien igual. El resto de las pantallas se pasan
+ * una por una al tema claro en un paso aparte (ver PLAN_FASE_M.md) y
+ * recién ahí este body cambia a claro también.
  */
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 body {
-  background: theme("colors.papel");
-  color: theme("colors.tinta");
+  background: linear-gradient(180deg, #1a0733 0%, #2c0a4d 60%, #3a0a5c 100%);
+  color: theme("colors.cream");
 }
 
-/* Scrollbar clara, consistente con el resto del tema (antes quedaba con
-   la scrollbar oscura por defecto del navegador sobre fondo oscuro). */
 ::selection {
   background: theme("colors.amarillo");
   color: theme("colors.tinta");

@@ -387,7 +387,7 @@ function NewQuestionForm({
           className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
         >
           {QUESTION_TYPES.map((t) => (
-            <option key={t.value} value={t.value} className="bg-purple-deep">
+            <option key={t.value} value={t.value} className="bg-papel text-tinta">
               {t.label}
             </option>
           ))}

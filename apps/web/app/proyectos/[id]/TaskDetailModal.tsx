@@ -261,13 +261,13 @@ export function TaskDetailModal({
                   onChange={(e) => setDependencyTarget(e.target.value)}
                   className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
                 >
-                  <option value="" className="bg-purple-deep">
+                  <option value="" className="bg-papel text-tinta">
                     Marcar que bloquea a...
                   </option>
                   {allTasks
                     .filter((t) => t.id !== task.id)
                     .map((t) => (
-                      <option key={t.id} value={t.id} className="bg-purple-deep">
+                      <option key={t.id} value={t.id} className="bg-papel text-tinta">
                         {t.title}
                       </option>
                     ))}
@@ -338,7 +338,7 @@ export function TaskDetailModal({
               className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow disabled:opacity-60"
             >
               {boardColumns.map((c) => (
-                <option key={c.id} value={c.id} className="bg-purple-deep">
+                <option key={c.id} value={c.id} className="bg-papel text-tinta">
                   {c.name}
                 </option>
               ))}
@@ -353,11 +353,11 @@ export function TaskDetailModal({
               onChange={(e) => withBusy(() => updateTask(task.id, { processId: e.target.value || null }))}
               className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow disabled:opacity-60"
             >
-              <option value="" className="bg-purple-deep">
+              <option value="" className="bg-papel text-tinta">
                 Sin proceso
               </option>
               {processes.map((p) => (
-                <option key={p.id} value={p.id} className="bg-purple-deep">
+                <option key={p.id} value={p.id} className="bg-papel text-tinta">
                   {p.name}
                 </option>
               ))}

@@ -743,7 +743,7 @@ export function NuevoCaso({
                     className="rounded-lg border border-white/20 bg-white/5 px-2 py-2 text-sm text-cream outline-none focus:border-yellow"
                   >
                     {NEED_CATEGORIES.map((c) => (
-                      <option key={c} value={c} className="bg-purple-deep">
+                      <option key={c} value={c} className="bg-papel text-tinta">
                         {NEED_CATEGORY_LABEL[c]}
                       </option>
                     ))}
@@ -758,7 +758,7 @@ export function NuevoCaso({
                     className="rounded-lg border border-white/20 bg-white/5 px-2 py-2 text-sm text-cream outline-none focus:border-yellow"
                   >
                     {NEED_URGENCIES.map((u) => (
-                      <option key={u} value={u} className="bg-purple-deep">
+                      <option key={u} value={u} className="bg-papel text-tinta">
                         {NEED_URGENCY_LABEL[u]}
                       </option>
                     ))}

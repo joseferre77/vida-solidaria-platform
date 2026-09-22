@@ -171,7 +171,7 @@ function AssignModal({
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
           >
             {teams.map((t) => (
-              <option key={t.id} value={t.id} className="bg-purple-deep">
+              <option key={t.id} value={t.id} className="bg-papel text-tinta">
                 {t.name}
               </option>
             ))}

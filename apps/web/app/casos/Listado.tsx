@@ -505,9 +505,9 @@ export function Listado({ canWrite, openCaseId }: { canWrite: boolean; openCaseI
               onChange={(e) => applyFilter({ caseType: (e.target.value || "") as CaseListFilters["caseType"] })}
               className="mt-1 w-full rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-cream outline-none focus:border-yellow"
             >
-              <option value="" className="bg-purple-deep">Todos</option>
+              <option value="" className="bg-papel text-tinta">Todos</option>
               {CASE_TYPES.map((t) => (
-                <option key={t} value={t} className="bg-purple-deep">
+                <option key={t} value={t} className="bg-papel text-tinta">
                   {CASE_TYPE_LABEL[t]}
                 </option>
               ))}
@@ -856,9 +856,9 @@ function CaseDetailModal({
               onChange={(e) => handleMatrixChange("viability", e.target.value)}
               className="w-full rounded-lg border border-white/20 bg-white/5 px-2 py-2 text-cream outline-none focus:border-yellow disabled:opacity-50"
             >
-              <option value="" className="bg-purple-deep">— sin definir —</option>
+              <option value="" className="bg-papel text-tinta">— sin definir —</option>
               {VIABILITIES.map((v) => (
-                <option key={v} value={v} className="bg-purple-deep">
+                <option key={v} value={v} className="bg-papel text-tinta">
                   {VIABILITY_LABEL[v]}
                 </option>
               ))}
@@ -872,9 +872,9 @@ function CaseDetailModal({
               onChange={(e) => handleMatrixChange("feasibility", e.target.value)}
               className="w-full rounded-lg border border-white/20 bg-white/5 px-2 py-2 text-cream outline-none focus:border-yellow disabled:opacity-50"
             >
-              <option value="" className="bg-purple-deep">— sin definir —</option>
+              <option value="" className="bg-papel text-tinta">— sin definir —</option>
               {FEASIBILITIES.map((f) => (
-                <option key={f} value={f} className="bg-purple-deep">
+                <option key={f} value={f} className="bg-papel text-tinta">
                   {FEASIBILITY_LABEL[f]}
                 </option>
               ))}
@@ -1022,7 +1022,7 @@ function CaseDetailModal({
                 className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
               >
                 {NEED_CATEGORIES.map((c) => (
-                  <option key={c} value={c} className="bg-purple-deep">
+                  <option key={c} value={c} className="bg-papel text-tinta">
                     {NEED_CATEGORY_LABEL[c]}
                   </option>
                 ))}
@@ -1033,7 +1033,7 @@ function CaseDetailModal({
                 className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
               >
                 {NEED_URGENCIES.map((u) => (
-                  <option key={u} value={u} className="bg-purple-deep">
+                  <option key={u} value={u} className="bg-papel text-tinta">
                     {NEED_URGENCY_LABEL[u]}
                   </option>
                 ))}
@@ -1256,11 +1256,11 @@ function AssignmentsSection({
             onChange={(e) => setPickUserId(e.target.value)}
             className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
           >
-            <option value="" className="bg-purple-deep">
+            <option value="" className="bg-papel text-tinta">
               Elegir persona...
             </option>
             {allUsers.map((u) => (
-              <option key={u.id} value={u.id} className="bg-purple-deep">
+              <option key={u.id} value={u.id} className="bg-papel text-tinta">
                 {u.name}
               </option>
             ))}
@@ -1271,7 +1271,7 @@ function AssignmentsSection({
             className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
           >
             {CASE_ASSIGNMENT_ROLES.map((r) => (
-              <option key={r} value={r} className="bg-purple-deep">
+              <option key={r} value={r} className="bg-papel text-tinta">
                 {CASE_ASSIGNMENT_ROLE_LABEL[r]}
               </option>
             ))}
@@ -1512,7 +1512,7 @@ function MemberCard({
                   className="flex-1 rounded-lg border border-white/20 bg-white/5 px-1.5 py-1 text-cream outline-none focus:border-yellow"
                 >
                   {NEED_CATEGORIES.map((c) => (
-                    <option key={c} value={c} className="bg-purple-deep">
+                    <option key={c} value={c} className="bg-papel text-tinta">
                       {NEED_CATEGORY_LABEL[c]}
                     </option>
                   ))}
@@ -1523,7 +1523,7 @@ function MemberCard({
                   className="flex-1 rounded-lg border border-white/20 bg-white/5 px-1.5 py-1 text-cream outline-none focus:border-yellow"
                 >
                   {NEED_URGENCIES.map((u) => (
-                    <option key={u} value={u} className="bg-purple-deep">
+                    <option key={u} value={u} className="bg-papel text-tinta">
                       {NEED_URGENCY_LABEL[u]}
                     </option>
                   ))}

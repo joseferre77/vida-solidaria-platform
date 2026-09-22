@@ -385,13 +385,13 @@ function StockItemCard({
                     onChange={(e) => setTransferTo(e.target.value)}
                     className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
                   >
-                    <option value="" className="bg-purple-deep">
+                    <option value="" className="bg-papel text-tinta">
                       Traspasar a...
                     </option>
                     {users
                       .filter((u) => u.id !== item.activeCustody?.holder?.id)
                       .map((u) => (
-                        <option key={u.id} value={u.id} className="bg-purple-deep">
+                        <option key={u.id} value={u.id} className="bg-papel text-tinta">
                           {u.name}
                         </option>
                       ))}
@@ -423,11 +423,11 @@ function StockItemCard({
                 onChange={(e) => setPickUserId(e.target.value)}
                 className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
               >
-                <option value="" className="bg-purple-deep">
+                <option value="" className="bg-papel text-tinta">
                   Prestar a...
                 </option>
                 {users.map((u) => (
-                  <option key={u.id} value={u.id} className="bg-purple-deep">
+                  <option key={u.id} value={u.id} className="bg-papel text-tinta">
                     {u.name}
                   </option>
                 ))}
@@ -475,10 +475,10 @@ function StockItemCard({
                 onChange={(e) => setMovementType(e.target.value as "ingreso" | "egreso")}
                 className="rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
               >
-                <option value="ingreso" className="bg-purple-deep">
+                <option value="ingreso" className="bg-papel text-tinta">
                   Ingreso
                 </option>
-                <option value="egreso" className="bg-purple-deep">
+                <option value="egreso" className="bg-papel text-tinta">
                   Egreso
                 </option>
               </select>
@@ -680,13 +680,13 @@ function QuickTileModal({
                   onChange={(e) => setTransferTo(e.target.value)}
                   className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow"
                 >
-                  <option value="" className="bg-purple-deep">
+                  <option value="" className="bg-papel text-tinta">
                     Pasar directo a...
                   </option>
                   {users
                     .filter((u) => u.id !== item.activeCustody?.holder?.id)
                     .map((u) => (
-                      <option key={u.id} value={u.id} className="bg-purple-deep">
+                      <option key={u.id} value={u.id} className="bg-papel text-tinta">
                         {u.name}
                       </option>
                     ))}
@@ -713,11 +713,11 @@ function QuickTileModal({
                 onChange={(e) => setPickUserId(e.target.value)}
                 className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow"
               >
-                <option value="" className="bg-purple-deep">
+                <option value="" className="bg-papel text-tinta">
                   Prestar a...
                 </option>
                 {users.map((u) => (
-                  <option key={u.id} value={u.id} className="bg-purple-deep">
+                  <option key={u.id} value={u.id} className="bg-papel text-tinta">
                     {u.name}
                   </option>
                 ))}
@@ -1007,9 +1007,9 @@ function HistorialMovimientosView({ users }: { users: BasicUser[] }) {
             onChange={(e) => setType(e.target.value as "" | "ingreso" | "egreso")}
             className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
           >
-            <option value="" className="bg-purple-deep">Todos</option>
-            <option value="ingreso" className="bg-purple-deep">Ingreso</option>
-            <option value="egreso" className="bg-purple-deep">Egreso</option>
+            <option value="" className="bg-papel text-tinta">Todos</option>
+            <option value="ingreso" className="bg-papel text-tinta">Ingreso</option>
+            <option value="egreso" className="bg-papel text-tinta">Egreso</option>
           </select>
         </label>
         <label className="text-xs">
@@ -1019,9 +1019,9 @@ function HistorialMovimientosView({ users }: { users: BasicUser[] }) {
             onChange={(e) => setCreatedBy(e.target.value)}
             className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
           >
-            <option value="" className="bg-purple-deep">Todos</option>
+            <option value="" className="bg-papel text-tinta">Todos</option>
             {users.map((u) => (
-              <option key={u.id} value={u.id} className="bg-purple-deep">
+              <option key={u.id} value={u.id} className="bg-papel text-tinta">
                 {u.name}
               </option>
             ))}
@@ -1261,7 +1261,7 @@ function StockItemFormModal({
               className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
             >
               {STOCK_UNITS.map((u) => (
-                <option key={u} value={u} className="bg-purple-deep">
+                <option key={u} value={u} className="bg-papel text-tinta">
                   {STOCK_UNIT_LABEL[u]}
                 </option>
               ))}

@@ -36,13 +36,13 @@ export function ListaTareas({ tasks, onOpenTask }: { tasks: TaskItem[]; onOpenTa
           onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
           className="rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-xs text-cream outline-none focus:border-yellow"
         >
-          <option value="dueDate" className="bg-purple-deep">
+          <option value="dueDate" className="bg-papel text-tinta">
             Ordenar por vencimiento
           </option>
-          <option value="priority" className="bg-purple-deep">
+          <option value="priority" className="bg-papel text-tinta">
             Ordenar por prioridad
           </option>
-          <option value="title" className="bg-purple-deep">
+          <option value="title" className="bg-papel text-tinta">
             Ordenar por título
           </option>
         </select>

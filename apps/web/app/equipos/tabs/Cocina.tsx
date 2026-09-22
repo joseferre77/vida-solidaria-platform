@@ -188,11 +188,11 @@ function NewBatchModal({
             onChange={(e) => setResponsibleUserId(e.target.value)}
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
           >
-            <option value="" className="bg-purple-deep">
+            <option value="" className="bg-papel text-tinta">
               Sin asignar todavía
             </option>
             {(users ?? []).map((u) => (
-              <option key={u.id} value={u.id} className="bg-purple-deep">
+              <option key={u.id} value={u.id} className="bg-papel text-tinta">
                 {u.name}
               </option>
             ))}
@@ -304,11 +304,11 @@ function BatchDetailModal({
             }
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm text-cream outline-none focus:border-yellow"
           >
-            <option value="" className="bg-purple-deep">
+            <option value="" className="bg-papel text-tinta">
               Sin asignar
             </option>
             {users.map((u) => (
-              <option key={u.id} value={u.id} className="bg-purple-deep">
+              <option key={u.id} value={u.id} className="bg-papel text-tinta">
                 {u.name}
               </option>
             ))}
@@ -365,11 +365,11 @@ function BatchDetailModal({
                 onChange={(e) => setPickStockId(e.target.value)}
                 className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
               >
-                <option value="" className="bg-purple-deep">
+                <option value="" className="bg-papel text-tinta">
                   Elegir insumo...
                 </option>
                 {availableStock.map((s) => (
-                  <option key={s.id} value={s.id} className="bg-purple-deep">
+                  <option key={s.id} value={s.id} className="bg-papel text-tinta">
                     {s.name} ({s.unit})
                   </option>
                 ))}
@@ -457,13 +457,13 @@ function BatchDetailModal({
                       onChange={(ev) => setTransferTo(ev.target.value)}
                       className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
                     >
-                      <option value="" className="bg-purple-deep">
+                      <option value="" className="bg-papel text-tinta">
                         Traspasar directo a...
                       </option>
                       {users
                         .filter((u) => u.id !== e.holder?.id)
                         .map((u) => (
-                          <option key={u.id} value={u.id} className="bg-purple-deep">
+                          <option key={u.id} value={u.id} className="bg-papel text-tinta">
                             {u.name}
                           </option>
                         ))}
@@ -497,11 +497,11 @@ function BatchDetailModal({
               onChange={(e) => setPickEquipId(e.target.value)}
               className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
             >
-              <option value="" className="bg-purple-deep">
+              <option value="" className="bg-papel text-tinta">
                 Elegir equipamiento...
               </option>
               {availableEquipment.map((s) => (
-                <option key={s.id} value={s.id} className="bg-purple-deep">
+                <option key={s.id} value={s.id} className="bg-papel text-tinta">
                   {s.name}
                 </option>
               ))}
@@ -565,11 +565,11 @@ function BatchDetailModal({
               onChange={(e) => setPickUserId(e.target.value)}
               className="flex-1 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
             >
-              <option value="" className="bg-purple-deep">
+              <option value="" className="bg-papel text-tinta">
                 Elegir persona...
               </option>
               {availableUsers.map((u) => (
-                <option key={u.id} value={u.id} className="bg-purple-deep">
+                <option key={u.id} value={u.id} className="bg-papel text-tinta">
                   {u.name}
                 </option>
               ))}
@@ -631,7 +631,7 @@ function NewStockItemInline({
           className="w-28 rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-cream outline-none focus:border-yellow"
         >
           {STOCK_UNITS.map((u) => (
-            <option key={u} value={u} className="bg-purple-deep">
+            <option key={u} value={u} className="bg-papel text-tinta">
               {STOCK_UNIT_LABEL[u]}
             </option>
           ))}

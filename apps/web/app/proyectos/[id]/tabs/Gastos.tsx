@@ -165,7 +165,7 @@ function NewExpenseModal({
             <span className="mb-1 block text-cream/70">Categoría</span>
             <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow">
               {CATEGORIES.map((c) => (
-                <option key={c} value={c} className="bg-purple-deep">
+                <option key={c} value={c} className="bg-papel text-tinta">
                   {c}
                 </option>
               ))}
@@ -175,7 +175,7 @@ function NewExpenseModal({
             <span className="mb-1 block text-cream/70">Cargado por</span>
             <select value={memberId} onChange={(e) => setMemberId(e.target.value)} className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow">
               {users.map((u) => (
-                <option key={u.id} value={u.id} className="bg-purple-deep">
+                <option key={u.id} value={u.id} className="bg-papel text-tinta">
                   {u.name}
                 </option>
               ))}

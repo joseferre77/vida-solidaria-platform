@@ -227,7 +227,7 @@ function NewFieldModal({
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
           >
             {TYPES.map((t) => (
-              <option key={t.value} value={t.value} className="bg-purple-deep">
+              <option key={t.value} value={t.value} className="bg-papel text-tinta">
                 {t.label}
               </option>
             ))}

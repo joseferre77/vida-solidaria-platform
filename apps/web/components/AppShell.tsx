@@ -202,8 +202,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const sectionTitle = sectionTitleFor(pathname ?? "")
   const visibleItems = user ? NAV_ITEMS.filter((i) => i.visible(user)) : []
 
+  // OJO: acá NO va bg-papel en el contenedor raíz — todavía envuelve a
+  // {children}, y casi todas las pantallas (Dashboard, Casos, etc.) están
+  // escritas para el fondo oscuro anterior (texto claro). Poner bg-papel
+  // acá las deja con texto claro sobre fondo claro, ilegible. Header y nav
+  // (abajo) sí llevan su propio bg-papel explícito — son los únicos dos
+  // pedazos ya rehechos para el tema claro. El resto se pasa pantalla por
+  // pantalla en un paso aparte (ver PLAN_FASE_M.md) y ahí sí este
+  // contenedor pasa a bg-papel también.
   return (
-    <div className="flex min-h-screen flex-col bg-papel">
+    <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-violeta/15 bg-papel/95 px-3 py-2 backdrop-blur sm:px-5">
         <Link href="/dashboard" className="flex min-w-0 shrink-0 items-center gap-2">
           <img src="/brand/isotipo.png" alt="" className="h-8 w-auto sm:hidden" />

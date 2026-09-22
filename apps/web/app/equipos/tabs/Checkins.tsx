@@ -72,11 +72,11 @@ export function Checkins() {
           }}
           className="rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow"
         >
-          <option value="" className="bg-purple-deep">
+          <option value="" className="bg-papel text-tinta">
             Todos los tipos
           </option>
           {(Object.keys(TYPE_LABEL) as CheckinType[]).map((t) => (
-            <option key={t} value={t} className="bg-purple-deep">
+            <option key={t} value={t} className="bg-papel text-tinta">
               {TYPE_LABEL[t]}
             </option>
           ))}
@@ -207,7 +207,7 @@ function NewCheckinModal({
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
           >
             {(Object.keys(TYPE_LABEL) as CheckinType[]).map((t) => (
-              <option key={t} value={t} className="bg-purple-deep">
+              <option key={t} value={t} className="bg-papel text-tinta">
                 {TYPE_LABEL[t]}
               </option>
             ))}
@@ -221,11 +221,11 @@ function NewCheckinModal({
             onChange={(e) => setTeamId(e.target.value)}
             className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-yellow"
           >
-            <option value="" className="bg-purple-deep">
+            <option value="" className="bg-papel text-tinta">
               Sin equipo
             </option>
             {teams.map((t) => (
-              <option key={t.id} value={t.id} className="bg-purple-deep">
+              <option key={t.id} value={t.id} className="bg-papel text-tinta">
                 {t.name}
               </option>
             ))}
