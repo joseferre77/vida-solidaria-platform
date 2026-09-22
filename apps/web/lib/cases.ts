@@ -104,11 +104,33 @@ export interface CaseListItem {
   mainPhotoUrl: string | null
   status: CaseStatus
   caseType: CaseType
+  sex: string | null
   viability: CaseViability | null
   feasibility: CaseFeasibility | null
   createdAt: string
   openNeedsCount: number
   memberCount: number
+  // Proyecto vinculado (auto-conversión o vínculo manual desde Proyectos)
+  // — null si el caso todavía no tiene uno. Alimenta el badge "En proyecto".
+  projectId: string | null
+}
+
+/** Cabecera de KPIs de /casos (pedido de Josecito 22/09/2026). */
+export interface CaseKpis {
+  total: number
+  activo: number
+  enSeguimiento: number
+  derivado: number
+  cerrado: number
+  enProyecto: number
+  relevadosUltimoDomingo: number
+}
+
+export interface CaseLinkedProject {
+  id: string
+  code: string
+  name: string
+  status: string
 }
 
 export interface CaseNeedItem {
@@ -224,6 +246,7 @@ export interface CaseDetail {
   assignments: CaseAssignmentItem[]
   members: CaseMemberItem[]
   surveyStartedAt: string | null
+  projects: CaseLinkedProject[]
 }
 
 /**
@@ -246,8 +269,36 @@ export interface CaseSearchResult {
 export const searchCases = (q: string) =>
   apiFetch(`/api/cases/search?q=${encodeURIComponent(q)}`) as Promise<CaseSearchResult[]>
 
-export const listCases = (status?: CaseStatus) =>
-  apiFetch(`/api/cases${status ? `?status=${status}` : ""}`) as Promise<CaseListItem[]>
+/** Filtros combinables del listado (bloque "Casos II" — buscador + filtros
+ * que faltaban, pedido de Josecito 22/09/2026). Todos son opcionales y se
+ * combinan con AND en el backend. */
+export interface CaseListFilters {
+  status?: CaseStatus | ""
+  q?: string
+  dateFrom?: string
+  dateTo?: string
+  caseType?: CaseType | ""
+  sex?: string
+  linkedToProject?: boolean
+}
+
+export const listCases = (filters: CaseListFilters = {}) => {
+  const params = new URLSearchParams()
+  if (filters.status) params.set("status", filters.status)
+  if (filters.q && filters.q.trim().length >= 2) params.set("q", filters.q.trim())
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom)
+  if (filters.dateTo) params.set("dateTo", filters.dateTo)
+  if (filters.caseType) params.set("caseType", filters.caseType)
+  if (filters.sex) params.set("sex", filters.sex)
+  if (filters.linkedToProject !== undefined) params.set("linkedToProject", String(filters.linkedToProject))
+  const qs = params.toString()
+  return apiFetch(`/api/cases${qs ? `?${qs}` : ""}`) as Promise<CaseListItem[]>
+}
+
+export const getCaseKpis = () => apiFetch("/api/cases/kpis") as Promise<CaseKpis>
+
+export const logCaseExport = (id: string, via: "descarga" | "compartir") =>
+  apiFetch(`/api/cases/${id}/export-log`, { method: "POST", body: JSON.stringify({ via }) })
 
 export const getCase = (id: string) => apiFetch(`/api/cases/${id}`) as Promise<CaseDetail>
 

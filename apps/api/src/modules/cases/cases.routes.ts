@@ -40,6 +40,11 @@ import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
 import { notify } from "../../lib/notify"
+// Import cruzado a Proyectos para la auto-conversión de casos (bloque
+// post-Fase-K "Casos II") — mismo patrón ya usado por analytics.routes.ts
+// (que importa `listProjects` de este mismo service), no es la primera vez
+// que un módulo importa del service de otro.
+import { createProject, linkCase } from "../projects/projects.service"
 
 const CASE_TYPES = ["individual", "pareja", "grupo_familiar"] as const
 const STAY_TYPES = ["calle", "parador_temporal"] as const
@@ -205,6 +210,24 @@ async function nextCaseNumber() {
   return `C${String(counter.value).padStart(6, "0")}`
 }
 
+// ────────────────────────────────────────────────
+// Auditoría mínima (AuditLog) — pedido explícito de Josecito: "quien baja
+// información, quien modifica" en los casos, mientras la Auditoría
+// completa queda pospuesta ("continuamos después con armar una
+// Auditoría"). Mismo patrón que `logActivity` en projects.service.ts —
+// se duplica acá en vez de importarlo para no acoplar los dos módulos más
+// de lo necesario (el import cruzado de arriba ya es el mínimo indispensable
+// para la auto-conversión a Proyecto).
+async function logActivity(actorId: string, entityType: string, entityId: string, action: string, diff?: unknown) {
+  try {
+    await prisma.auditLog.create({
+      data: { userId: actorId, entityType, entityId, action, diff: diff === undefined ? undefined : (diff as never) },
+    })
+  } catch {
+    // La auditoría nunca debe tirar abajo la operación real que la generó.
+  }
+}
+
 const CASE_DETAIL_INCLUDE = {
   contactsHistory: { orderBy: { contactedAt: "desc" as const } },
   locations: { orderBy: { recordedAt: "desc" as const } },
@@ -215,6 +238,10 @@ const CASE_DETAIL_INCLUDE = {
   needs: { orderBy: { createdAt: "desc" as const } },
   statusHistory: { orderBy: { changedAt: "desc" as const } },
   assignments: { orderBy: { assignedAt: "desc" as const } },
+  // Proyecto(s) vinculado(s) — normalmente uno solo (el que generó la
+  // auto-conversión o el que se vinculó a mano desde Proyectos), pero
+  // ProjectCase es muchos-a-muchos así que se listan todos por las dudas.
+  projects: { include: { project: { select: { id: true, code: true, name: true, status: true } } } },
   members: {
     orderBy: { createdAt: "asc" as const },
     include: {
@@ -313,6 +340,7 @@ async function serializeCaseDetail(c: any) {
       assignedAt: x.assignedAt,
       unassignedAt: x.unassignedAt,
     })),
+    projects: c.projects.map((x: any) => ({ id: x.project.id, code: x.project.code, name: x.project.name, status: x.project.status })),
     members: c.members.map((m: any) => ({
       id: m.id,
       fullName: m.fullName,
@@ -334,11 +362,42 @@ async function serializeCaseDetail(c: any) {
 }
 
 export async function casesRoutes(app: FastifyInstance) {
+  // Fase K bloque "Casos II" (pedido de Josecito 22/09/2026) — buscador y
+  // filtros que faltaban en el listado: nombre/alias/dni (`q`, mismo
+  // criterio insensible a mayúsculas que /cases/search), rango de fecha de
+  // carga, tipo de caso, sexo y "vinculado a proyecto" (`linkedToProject`),
+  // combinables entre sí y con el filtro de estado que ya existía. También
+  // se agrega `projectId` a cada fila (el primer proyecto vinculado, si
+  // hay) para poder pintar el badge "En proyecto" y navegar directo sin
+  // pedir el detalle completo del caso.
   app.get("/cases", { preHandler: [requireAuth, requirePermission("cases.read")] }, async (request) => {
-    const { status } = request.query as { status?: string }
+    const { status, q, dateFrom, dateTo, caseType, sex, linkedToProject } = request.query as {
+      status?: string
+      q?: string
+      dateFrom?: string
+      dateTo?: string
+      caseType?: string
+      sex?: string
+      linkedToProject?: string
+    }
+    const query = (q ?? "").trim()
+    const textFilter = (field: "fullName" | "alias" | "dni") => ({
+      [field]: { contains: query, mode: "insensitive" as const },
+    })
+
     const cases = await prisma.case.findMany({
-      where: { status: (status as (typeof CASE_STATUSES)[number]) || undefined },
-      include: { needs: true, members: { select: { id: true } } },
+      where: {
+        status: (status as (typeof CASE_STATUSES)[number]) || undefined,
+        caseType: (caseType as (typeof CASE_TYPES)[number]) || undefined,
+        sex: sex || undefined,
+        ...(query.length >= 2 ? { OR: [textFilter("fullName"), textFilter("alias"), textFilter("dni")] } : {}),
+        ...(dateFrom || dateTo
+          ? { createdAt: { gte: dateFrom ? new Date(dateFrom) : undefined, lte: dateTo ? new Date(dateTo) : undefined } }
+          : {}),
+        ...(linkedToProject === "true" ? { projects: { some: {} } } : {}),
+        ...(linkedToProject === "false" ? { projects: { none: {} } } : {}),
+      },
+      include: { needs: true, members: { select: { id: true } }, projects: { select: { projectId: true }, take: 1 } },
       orderBy: { createdAt: "desc" },
       take: 200,
     })
@@ -351,12 +410,52 @@ export async function casesRoutes(app: FastifyInstance) {
       mainPhotoUrl: c.mainPhotoUrl,
       status: c.status,
       caseType: c.caseType,
+      sex: c.sex,
       viability: c.viability,
       feasibility: c.feasibility,
       createdAt: c.createdAt,
       openNeedsCount: c.needs.filter((n) => !n.resolvedAt).length,
       memberCount: c.members.length,
+      projectId: c.projects[0]?.projectId ?? null,
     }))
+  })
+
+  // Cabecera de KPIs de /casos (pedido de Josecito 22/09/2026): conteos
+  // simples, todo en un solo `groupBy` de estado + 2 counts puntuales, sin
+  // N+1. "Relevados el último domingo" usa el domingo más próximo hacia
+  // atrás (incluido hoy si hoy es domingo) en huso horario de Argentina,
+  // porque la organización sale a relevar los domingos (ver manual de
+  // marca: "Salimos todos los domingos a las 19 hs") — no es una ventana
+  // de "últimos 7 días" genérica.
+  app.get("/cases/kpis", { preHandler: [requireAuth, requirePermission("cases.read")] }, async () => {
+    const nowAR = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }))
+    const lastSunday = new Date(nowAR)
+    lastSunday.setDate(nowAR.getDate() - nowAR.getDay())
+    lastSunday.setHours(0, 0, 0, 0)
+    const nextSunday = new Date(lastSunday)
+    nextSunday.setDate(lastSunday.getDate() + 7)
+
+    const [byStatus, relevadosUltimoDomingo, enProyecto, total] = await Promise.all([
+      prisma.case.groupBy({ by: ["status"], _count: { _all: true } }),
+      prisma.case.count({ where: { createdAt: { gte: lastSunday, lt: nextSunday } } }),
+      prisma.case.count({ where: { projects: { some: {} } } }),
+      prisma.case.count(),
+    ])
+    const statusCounts = Object.fromEntries(CASE_STATUSES.map((s) => [s, 0])) as Record<
+      (typeof CASE_STATUSES)[number],
+      number
+    >
+    for (const row of byStatus) statusCounts[row.status] = row._count._all
+
+    return {
+      total,
+      activo: statusCounts.activo,
+      enSeguimiento: statusCounts.en_seguimiento,
+      derivado: statusCounts.derivado,
+      cerrado: statusCounts.cerrado,
+      enProyecto,
+      relevadosUltimoDomingo,
+    }
   })
 
   // Fase K bloque E — buscador anti-duplicados: primer paso del flujo
@@ -483,18 +582,80 @@ export async function casesRoutes(app: FastifyInstance) {
 
       return tx.case.findUniqueOrThrow({ where: { id: caseRecord.id }, include: CASE_DETAIL_INCLUDE })
     })
+    await logActivity(userId, "case", created.id, "created", { caseNumber, fullName: body.fullName })
     return reply.code(201).send(await serializeCaseDetail(created))
   })
 
+  // Decisión de diseño (pedido de Josecito 22/09/2026, "ayudame vos"):
+  // Viabilidad = qué tan viable es la situación de LA PERSONA para llevar
+  // el caso a buen término (salud, redes, voluntad propia — alta/media/
+  // baja). Factibilidad = si es factible para VIDA SOLIDARIA intervenir
+  // AHORA con los recursos/capacidad operativa del equipo (factible/
+  // no_factible/en_pausa). Dejan de ser redundantes: uno mira a la
+  // persona, el otro a la organización. Cuando cualquiera de los dos dice
+  // "sí, avancemos" (viability alta/media, o feasibility factible) y el
+  // caso todavía no tiene un Proyecto vinculado, se auto-convierte: se crea
+  // un Proyecto, se linkea (ProjectCase) y si el caso seguía "activo" pasa
+  // a "en_seguimiento" (que es, en la práctica, "tiene un proyecto interno
+  // en curso"). Es idempotente: el guard es "no tiene proyecto vinculado
+  // todavía", así que ediciones posteriores no duplican el proyecto.
   app.patch("/cases/:id", { preHandler: [requireAuth, requirePermission("cases.write")] }, async (request) => {
     const { id } = request.params as { id: string }
     const body = updateCaseSchema.parse(request.body)
+    const actorId = request.user!.sub
+    const before = await prisma.case.findUniqueOrThrow({ where: { id } })
+
+    const nextViability = body.viability !== undefined ? body.viability : before.viability
+    const nextFeasibility = body.feasibility !== undefined ? body.feasibility : before.feasibility
+    const triggersProject = nextViability === "alta" || nextViability === "media" || nextFeasibility === "factible"
+    const existingLink = triggersProject ? await prisma.projectCase.findFirst({ where: { caseId: id } }) : null
+    const shouldAutoConvert = triggersProject && !existingLink
+    const shouldBumpStatus = shouldAutoConvert && before.status === "activo"
+
     const updated = await prisma.case.update({
       where: { id },
-      data: { ...body, updatedBy: request.user!.sub },
+      data: {
+        ...body,
+        updatedBy: actorId,
+        ...(shouldBumpStatus
+          ? {
+              status: "en_seguimiento" as const,
+              statusHistory: { create: { fromStatus: before.status, toStatus: "en_seguimiento", changedBy: actorId } },
+            }
+          : {}),
+      },
       include: CASE_DETAIL_INCLUDE,
     })
-    return serializeCaseDetail(updated)
+    await logActivity(actorId, "case", id, "updated", body)
+
+    let finalCase = updated
+    if (shouldAutoConvert) {
+      const project = await createProject({
+        name: `Caso ${updated.caseNumber} — ${updated.fullName}`,
+        description:
+          "Proyecto creado automáticamente al evaluar el caso como viable y/o factible (ver Casos > detalle del caso).",
+        area: "Casos sociales",
+        priority: nextViability === "alta" ? "alta" : "media",
+        ownerId: actorId,
+      })
+      await linkCase(project.id, id, actorId)
+
+      const notifyIds = Array.from(new Set([...(await activeAssigneeIds(id)), actorId]))
+      await notify(notifyIds, {
+        title: `Caso convertido a proyecto: ${updated.caseNumber}`,
+        body: `${updated.fullName} — se creó el proyecto ${project.code} a partir de la evaluación de viabilidad/factibilidad.`,
+        link: `/proyectos/${project.id}`,
+        type: "case_converted_to_project",
+        email: {
+          subject: `Vida Solidaria — el caso ${updated.caseNumber} pasó a Proyecto`,
+          html: `<p>El caso <strong>${updated.caseNumber} — ${updated.fullName}</strong> se convirtió automáticamente en el proyecto <strong>${project.code} — ${project.name}</strong>.</p>`,
+        },
+      })
+
+      finalCase = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
+    }
+
+    return serializeCaseDetail(finalCase)
   })
 
   app.patch(
@@ -514,6 +675,7 @@ export async function casesRoutes(app: FastifyInstance) {
         },
         include: CASE_DETAIL_INCLUDE,
       })
+      await logActivity(request.user!.sub, "case", id, "status_changed", { from: current.status, to: body.status })
 
       // "Estado de cierre" = CaseStatus.cerrado (ver nota de diseño arriba
       // del archivo) — se avisa al equipo asignado con el motivo, si el
@@ -534,6 +696,22 @@ export async function casesRoutes(app: FastifyInstance) {
       }
 
       return serializeCaseDetail(updated)
+    },
+  )
+
+  // Auditoría mínima del export a PDF (pedido explícito de Josecito: "con
+  // una auditoría de quien baja información" — la Auditoría completa se
+  // deja para después, esto es lo puntual para el botón de exportar). El
+  // frontend llama este endpoint justo antes de disparar la descarga/
+  // compartir del PDF de perfil de caso.
+  app.post(
+    "/cases/:id/export-log",
+    { preHandler: [requireAuth, requirePermission("cases.read")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const { via } = z.object({ via: z.enum(["descarga", "compartir"]).default("descarga") }).parse(request.body ?? {})
+      await logActivity(request.user!.sub, "case", id, "exported_pdf", { via })
+      return reply.code(204).send()
     },
   )
 

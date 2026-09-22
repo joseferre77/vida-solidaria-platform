@@ -173,10 +173,108 @@ export async function downloadTablePdf(reportTitle: string, filename: string, se
   finish(filename)
 }
 
-/** Reporte "general": lista de KPIs sueltos (sin tabla) por sección. */
-export async function downloadKpiPdf(
+/**
+ * Perfil de caso en PDF (pedido de Josecito 22/09/2026): "poder exportar
+ * el proyecto y/o perfil del caso a pdf con un botón y compartir por
+ * whatsapp, email o descargar a PC". Esto cubre la mitad "caso" — usa el
+ * mismo armazón de marca que los reportes de /analitica (`downloadKpiPdf`),
+ * agrupado por secciones legibles para compartir con quien no usa la
+ * plataforma. El llamado a `/cases/:id/export-log` (auditoría mínima) lo
+ * dispara el componente que llama a esta función, no esta función — así
+ * queda registrado el intento aunque la generación del PDF falle.
+ */
+export interface CasePdfInput {
+  caseNumber: string
+  fullName: string
+  alias: string | null
+  statusLabel: string
+  caseTypeLabel: string
+  approxAge: number | null
+  sex: string | null
+  dni: string | null
+  phone: string | null
+  dayZone: string | null
+  currentSleepSpot: string | null
+  viabilityLabel: string | null
+  feasibilityLabel: string | null
+  healthStatus: string | null
+  legalSituation: string | null
+  substanceUse: string | null
+  closeReason: string | null
+  linkedProjects: { code: string; name: string }[]
+  needs: { label: string; resolved: boolean }[]
+  recentContacts: { date: string; author: string; notes: string }[]
+}
+
+function casePdfSections(c: CasePdfInput): { heading: string; items: { label: string; value: string | number }[] }[] {
+  return [
+    {
+      heading: "Datos del caso",
+      items: [
+        { label: "N° de caso", value: c.caseNumber },
+        { label: "Nombre", value: c.alias ? `${c.fullName} (${c.alias})` : c.fullName },
+        { label: "Tipo de caso", value: c.caseTypeLabel },
+        { label: "Estado", value: c.statusLabel },
+        ...(c.approxAge ? [{ label: "Edad aproximada", value: c.approxAge }] : []),
+        ...(c.sex ? [{ label: "Sexo", value: c.sex }] : []),
+        ...(c.dni ? [{ label: "DNI", value: c.dni }] : []),
+        ...(c.phone ? [{ label: "Teléfono", value: c.phone }] : []),
+        ...(c.dayZone ? [{ label: "Zona", value: c.dayZone }] : []),
+        ...(c.currentSleepSpot ? [{ label: "Dónde duerme", value: c.currentSleepSpot }] : []),
+      ],
+    },
+    {
+      heading: "Evaluación",
+      items: [
+        { label: "Viabilidad (de la persona)", value: c.viabilityLabel ?? "Sin definir" },
+        { label: "Factibilidad (de intervención)", value: c.feasibilityLabel ?? "Sin definir" },
+        ...(c.linkedProjects.length
+          ? [{ label: "Proyecto vinculado", value: c.linkedProjects.map((p) => `${p.code} — ${p.name}`).join(", ") }]
+          : []),
+        ...(c.healthStatus ? [{ label: "Salud", value: c.healthStatus }] : []),
+        ...(c.legalSituation ? [{ label: "Situación legal", value: c.legalSituation }] : []),
+        ...(c.substanceUse ? [{ label: "Consumo", value: c.substanceUse }] : []),
+        ...(c.closeReason ? [{ label: "Motivo de cierre", value: c.closeReason }] : []),
+      ],
+    },
+    ...(c.needs.length
+      ? [
+          {
+            heading: "Necesidades",
+            items: c.needs.map((n) => ({ label: n.label, value: n.resolved ? "Resuelta" : "Abierta" })),
+          },
+        ]
+      : []),
+    ...(c.recentContacts.length
+      ? [
+          {
+            heading: "Bitácora reciente",
+            items: c.recentContacts
+              .slice(0, 5)
+              .map((entry) => ({ label: `${entry.date} · ${entry.author}`, value: entry.notes })),
+          },
+        ]
+      : []),
+  ]
+}
+
+export async function downloadCasePdf(c: CasePdfInput) {
+  await downloadKpiPdf(`Perfil de caso — ${c.caseNumber}`, `caso-${c.caseNumber}.pdf`, casePdfSections(c))
+}
+
+/** Versión "File" del perfil de caso, para el botón Compartir. */
+export async function getCasePdfFile(c: CasePdfInput): Promise<File> {
+  return getKpiPdfFile(`Perfil de caso — ${c.caseNumber}`, `caso-${c.caseNumber}.pdf`, casePdfSections(c))
+}
+
+/**
+ * Arma el `doc` de jsPDF de un reporte "de KPIs sueltos" (sin tabla) sin
+ * guardarlo — separado de `downloadKpiPdf` para poder reusarlo también
+ * como Blob compartible (botón "Compartir" del perfil de caso, que
+ * necesita un File para `navigator.share`, no un `.save()` directo).
+ */
+async function buildKpiPdfDoc(
   reportTitle: string,
-  filename: string,
   sections: { heading: string; items: { label: string; value: string | number }[] }[],
 ) {
   const { doc, marginTop, drawHeaderFooter, finish } = await createBrandedPdf(reportTitle)
@@ -212,5 +310,32 @@ export async function downloadKpiPdf(
     }
     y += 10
   }
+  return { doc, finish }
+}
+
+/** Reporte "general": lista de KPIs sueltos (sin tabla) por sección. */
+export async function downloadKpiPdf(
+  reportTitle: string,
+  filename: string,
+  sections: { heading: string; items: { label: string; value: string | number }[] }[],
+) {
+  const { finish } = await buildKpiPdfDoc(reportTitle, sections)
   finish(filename)
+}
+
+/**
+ * Igual que `downloadKpiPdf` pero devuelve un `File` en vez de disparar la
+ * descarga — lo usa el botón "Compartir" del perfil de caso para pasarlo a
+ * `navigator.share({ files: [...] })` (WhatsApp/email nativos del
+ * celular). El llamador hace el fallback a descarga si el navegador no
+ * soporta compartir archivos.
+ */
+export async function getKpiPdfFile(
+  reportTitle: string,
+  filename: string,
+  sections: { heading: string; items: { label: string; value: string | number }[] }[],
+): Promise<File> {
+  const { doc } = await buildKpiPdfDoc(reportTitle, sections)
+  const blob = doc.output("blob") as Blob
+  return new File([blob], filename, { type: "application/pdf" })
 }

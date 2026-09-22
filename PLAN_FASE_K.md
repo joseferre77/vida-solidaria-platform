@@ -24,6 +24,10 @@
 > (Resend, watchdog) al momento del pedido; se sigue con esos dos, y si
 > Josecito tenía un tercero en mente que no llegó a este documento, que lo
 > diga y se agrega.
+>
+> **Casos II (22/09/2026)** — ver bloque I más abajo: KPIs, slider de
+> fotos, buscador/filtros, auto-conversión de caso a Proyecto, export a
+> PDF. **Entregado y en producción (22/09/2026).**
 
 ## Método
 
@@ -459,3 +463,168 @@ Josecito (Resend y watchdog, ver el aviso al principio de este documento).
 
 7. ~~**H (post-Fase-K: dashboard, analítica ampliada, mapa, reportes)**~~ —
    **entregado y en producción el 22/09/2026.**
+8. ~~**I (Casos II: KPIs, slider de fotos, buscador/filtros,
+   auto-conversión a Proyecto, export a PDF)**~~ — **entregado y en
+   producción el 22/09/2026.**
+
+---
+
+## I) Casos II — KPIs, slider de fotos, auto-conversión a Proyecto, buscador,
+## export a PDF (NUEVO) ✅ ENTREGADO (22/09/2026)
+
+Pedido de Josecito (22/09/2026, mensaje largo sobre `/casos`) + un
+mensaje de seguimiento sobre qué significa cada estado del caso. Cubre
+los 7 puntos que pidió, todos "ayudame vos" resueltos acá con una
+decisión documentada (no se le preguntó nada de vuelta, siguiendo el
+criterio ya usado en los bloques D y H de este documento):
+
+**1) Sentido de los estados del caso (`CaseStatus`) + su relación con
+Proyectos** — respuesta directa al segundo mensaje de Josecito:
+
+- **Activo**: caso recién relevado, sin evaluación todavía o de baja
+  prioridad por ahora. Estado por defecto al crear un caso.
+- **En seguimiento**: el equipo lo está trabajando activamente. Se llega
+  acá a mano, O automáticamente cuando se auto-convierte a Proyecto (ver
+  punto 3) — "en seguimiento" es, en la práctica, "tiene un proyecto
+  interno en curso".
+- **Derivado**: se derivó a otra institución/organismo — el circuito
+  interno de Vida Solidaria termina ahí (no impide igual la
+  auto-conversión si más adelante se le carga viabilidad/factibilidad;
+  ver nota de diseño abajo).
+- **Cerrado**: fin del seguimiento (motivo en `closeReason`, ya existía).
+
+  Los 4 chips de filtro se dejaron con el mismo texto que ya tenían
+  (Activo / En seguimiento / Derivado / Cerrado, `CASE_STATUS_LABEL`) —
+  ya estaban bien nombrados, el pedido era de significado, no de texto. Se
+  agregó un quinto chip no excluyente, **"Vinculados a Proyecto"**, que
+  filtra por `projects.some({})` combinado con cualquier estado.
+
+**2) Navegabilidad estado → Proyecto**: el badge amarillo **"En
+proyecto"** (nombre elegido — ver punto 4) es clickeable tanto en la
+tarjeta del listado como en el modal de detalle, y lleva directo a
+`/proyectos/:id` (la ruta ya existente con las pestañas del proyecto).
+
+**3) Viabilidad vs. Factibilidad — ya no son redundantes**: se
+redefinieron en vez de borrar una (evita romper el enum/datos ya
+cargados):
+- **Viabilidad** = qué tan viable es la situación de **la persona**
+  (salud, redes, voluntad propia) — alta/media/baja, sin cambios de
+  valores.
+- **Factibilidad** = si es factible para **Vida Solidaria** intervenir
+  **ahora** con el equipo/recursos disponibles — factible/no_factible/
+  en_pausa, sin cambios de valores.
+  Uno mira a la persona, el otro a la organización — se agregó el
+  subtítulo aclaratorio en el modal (`(de la persona)` / `(de intervenir
+  ahora)`) y una nota de una línea abajo del selector.
+
+**4) Auto-conversión a Proyecto**: al guardar `viability` o `feasibility`
+(`PATCH /cases/:id`), si `viability` queda en alta/media **O**
+`feasibility` queda en factible (criterio "o" tal cual lo pidió Josecito,
+no "y") y el caso **todavía no tiene un Proyecto vinculado**, se crea un
+Proyecto (`Caso <N°> — <nombre>`, área "Casos sociales", prioridad alta/
+media según viabilidad), se linkea vía `ProjectCase` (mismo mecanismo que
+ya usaba "Vincular caso a Proyecto" desde el módulo Proyectos) y se avisa
+al equipo asignado. Es **idempotente**: el guard es "no tiene proyecto
+vinculado todavía", así que ediciones posteriores no duplican el
+proyecto aunque la condición se siga cumpliendo. Si el caso estaba
+"activo" pasa a "en_seguimiento" en el mismo movimiento; si ya estaba en
+otro estado explícito (derivado/cerrado) se respeta — la conversión no
+le pisa el estado, solo le agrega el proyecto.
+  El **botón amarillo del listado/detalle se llama "En proyecto"**
+  (nombre elegido, alternativas descartadas: "Pasado a proyecto" —
+  quedaba largo para un chip; "Convertido" — menos claro para un
+  voluntario nuevo).
+
+**5) Buscador + filtros del listado** (no existían): `GET /cases` ahora
+acepta `q` (nombre/alias/dni, mismo criterio insensible a mayúsculas que
+`/cases/search`), `dateFrom`/`dateTo`, `caseType`, `sex` y
+`linkedToProject`, todos combinables entre sí y con `status`. Buscador
+con debounce de 400ms en el frontend; el resto en un panel "Más filtros"
+plegado por default para no saturar la pantalla en mobile.
+
+**6) Cabecera de KPIs + slider de fotos**: `GET /cases/kpis` (conteo por
+estado + `enProyecto` + `relevadosUltimoDomingo`, este último es el
+domingo más próximo hacia atrás en huso horario de Argentina, no una
+ventana de 7 días — la organización relevé los domingos). El slider
+auto-avanza cada 4s (pausa al tocar/hacer hover), muestra hasta 12 casos
+no cerrados con su foto o el placeholder de persona, nombre abajo, tap
+abre el caso. **Tratamiento de foto**: marco rectangular con borde
+amarillo (sin redondeos tipo óvalo ni sombra) — siguiendo la sección
+"Fotografía" del manual de marca que Josecito adjuntó el mismo día ("la
+foto va a caja llena, recortada en rectángulo... no se aplican marcos
+redondeados ni sombras"). El placeholder sin foto usa un ícono de
+persona de línea (trazo 2px, un solo color), mismo criterio que la
+sección "Iconografía" del manual. Nota de privacidad: la "regla de oro"
+del manual sobre nunca publicar fotos de personas en situación de calle
+sin consentimiento aplica a comunicación **externa** (redes, sitio de
+donación — el manual dice explícitamente que la página de donación no
+lleva fotos de personas asistidas); este slider es **interno**, detrás
+de login y del permiso `cases.read`, con el mismo propósito que ya tiene
+el resto del módulo Casos (identificar a la persona para poder
+ayudarla) — no es una pieza de marketing. Se deja anotado acá por si en
+algún momento se necesita agregar un campo de consentimiento explícito
+al caso.
+
+**7) Exportar caso a PDF + compartir + auditoría mínima de quién
+descarga**: botones "Descargar PDF" / "Compartir (WhatsApp / email)" en
+el detalle del caso, mismo armazón de marca que los reportes de
+`/analitica` (`lib/reports.ts`). Compartir usa `navigator.share` con
+`files` (Web Share API) cuando el navegador lo soporta (Android/iOS
+recientes); si no, cae a una descarga común para adjuntar a mano. Antes
+de generar el PDF se llama a `POST /cases/:id/export-log`, que deja un
+`AuditLog` con quién y cuándo — la Auditoría completa sigue pospuesta
+("continuamos después con armar una Auditoría", palabras de Josecito),
+pero de yapa se agregó `logActivity` en creación/edición/cambio de
+estado de un caso (mismo patrón que ya usa el módulo Proyectos vía
+`AuditLog`), así "quien modifica" también queda cubierto sin construir
+una UI de auditoría todavía.
+
+**Sin cambios de schema** — `ProjectCase`, `AuditLog`,
+`CaseStatusHistory` ya existían, no hizo falta ninguna migración nueva.
+
+**Verificación**: `tsc --noEmit` limpio en API y Web, `next build`
+limpio, test funcional `apps/api/test_casos_ii.js` con Postgres local
+(28/28 aserciones OK: KPIs, cada filtro, auto-conversión + idempotencia
++ no-pisa-estado-explícito, badge/link a proyecto, log de auditoría de
+export y de creación/edición).
+
+**Pendiente — manual de marca (adjuntado por Josecito el 22/09/2026)**:
+se leyó completo (36 páginas) y se aplicó a lo nuevo de este bloque
+(marco de foto, ícono de persona, tono de los textos). **No** se tocaron
+todavía los tokens de color/tipografía de TODA la plataforma —
+`brand-tokens.json` sigue con la paleta anterior (violeta `#3a0a5c`,
+amarillo `#ffd400`, azul `#123a7a`, fuentes Baloo 2 + Poppins) en vez de
+la oficial del manual (violeta `#73038C`, amarillo `#FDED03`, azul
+`#013681`, fuentes Outfit + Work Sans). Se decidió así para que Casos no
+quede con un look distinto al resto de la plataforma ya construida —
+mezclar tokens a medias es peor que no tocarlos. Queda como un bloque
+aparte ("J", a definir) para reconciliar toda la plataforma de una sola
+vez con control de calidad, si Josecito lo prioriza.
+
+**Nota de infraestructura de esta sesión — dónde vive de verdad el repo**:
+el contenedor de trabajo en la nube de esta sesión se reinició (sesión
+larga, se cortó y se retomó) y vino sin el `~/.ssh` con la clave de
+Hostinger ni el repositorio git de sesiones anteriores — solo
+persistieron los archivos de código sueltos, en una copia de trabajo sin
+`.git` (`vs-typecheck-full`, usada solo para tipar/buildear). Ahí se
+armó por error un repo git nuevo desde cero (commit `a6f84eb`) antes de
+darse cuenta del problema — **ese commit queda huérfano en el
+contenedor de la nube y no importa, el historial real sigue siendo
+este** (el de acá, en `C:\Users\pablo\develop\vida-solidaria` en tu
+máquina, con el commit `a14b1ae` como base). La solución fue usar el
+puente al dispositivo (esta máquina, conectada a la sesión de Cowork)
+en vez del contenedor de la nube: acá SÍ está el repo real con todo el
+historial, y `ssh hostinger-vidasolidaria` anda perfecto (la clave está
+en `~/.ssh/` de esta máquina, no en la nube). De hecho el contenedor de
+la nube **no puede** hacer SSH/TCP crudo aunque tuviera la clave —
+solo tiene salida HTTPS a través de un proxy con lista blanca; lo que
+sí puede hacer bien es compilar/buildear (Node, npm, tsc), así que el
+flujo que terminó funcionando fue: código se edita en la nube → se
+prueba ahí (Postgres local + test funcional) → se transfieren los
+archivos finales y el build ya armado a esta máquina (`SendUserFile` +
+`device_commit_files`) → el deploy por SSH real (`scp`/`ssh`) corre
+desde acá. **Para la próxima vez**: si el contenedor de la nube no
+tiene `~/.ssh/config` con `hostinger-vidasolidaria`, no es necesariamente
+que se perdió el acceso — primero probar si hay una máquina conectada
+por el puente de dispositivo (`get_device_info`) antes de asumir que
+hace falta pedirte la clave de nuevo.

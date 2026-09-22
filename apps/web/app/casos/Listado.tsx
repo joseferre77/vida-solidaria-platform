@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import {
   addCaseContact,
   addCaseMember,
@@ -15,6 +16,7 @@ import {
   CASE_STATUS_LABEL,
   CASE_STATUSES,
   CASE_TYPE_LABEL,
+  CASE_TYPES,
   changeCaseStatus,
   deleteCaseMember,
   deleteCaseMemberPhoto,
@@ -23,7 +25,9 @@ import {
   FEASIBILITY_LABEL,
   FEASIBILITIES,
   getCase,
+  getCaseKpis,
   listCases,
+  logCaseExport,
   NEED_CATEGORIES,
   NEED_CATEGORY_LABEL,
   NEED_URGENCIES,
@@ -38,12 +42,15 @@ import {
   VIABILITIES,
   type CaseAssignmentRole,
   type CaseDetail,
+  type CaseKpis,
+  type CaseListFilters,
   type CaseListItem,
   type CaseMemberItem,
   type CaseStatus,
   type NeedCategory,
   type NeedUrgency,
 } from "../../lib/cases"
+import { downloadCasePdf, getCasePdfFile, type CasePdfInput } from "../../lib/reports"
 import { listBasicUsers, type BasicUser } from "../../lib/projects"
 
 const STATUS_COLOR: Record<CaseStatus, string> = {
@@ -59,6 +66,154 @@ function formatDateTime(d: string) {
 
 function mapsLink(lat: number, lng: number) {
   return `https://www.google.com/maps?q=${lat},${lng}`
+}
+
+/**
+ * Marco de foto de un caso — cuadro RECTANGULAR (no óvalo/círculo ni
+ * sombra) con borde de color que contrasta, según la sección "Fotografía"
+ * del manual de marca ("la foto va a caja llena, recortada en rectángulo
+ * ... no se aplican marcos redondeados ni sombras"). Si no hay foto, cae a
+ * un ícono de persona de línea (mismo criterio que "Iconografía" del
+ * manual: trazo 2px, un solo color, caja cuadrada) en vez de dejar el
+ * espacio vacío — pedido explícito de Josecito para el popup del caso.
+ */
+function CaseAvatarFrame({
+  url,
+  name,
+  size = "md",
+}: {
+  url: string | null
+  name: string
+  size?: "sm" | "md" | "lg"
+}) {
+  const dims = size === "lg" ? "h-44 w-36" : size === "md" ? "h-28 w-24" : "h-16 w-14"
+  return (
+    <div className={`shrink-0 overflow-hidden rounded-lg border-2 border-yellow bg-purple-deep/60 ${dims}`}>
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt={name} className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-1/2 w-1/2 text-yellow/60"
+          >
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" />
+          </svg>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Cabecera de KPIs de /casos (pedido de Josecito 22/09/2026). Números en
+ * font-display (Outfit vía brand-tokens — ver nota de PLAN_FASE_K.md sobre
+ * la reconciliación pendiente de tipografías oficiales) para que se lean
+ * de lejos, como el resto de los KPIs ya entregados en /analitica.
+ */
+function CasosKpis({ kpis }: { kpis: CaseKpis | null }) {
+  const items: { label: string; value: number }[] = kpis
+    ? [
+        { label: "Relevados último domingo", value: kpis.relevadosUltimoDomingo },
+        { label: "Activos", value: kpis.activo },
+        { label: "En seguimiento", value: kpis.enSeguimiento },
+        { label: "Derivados", value: kpis.derivado },
+        { label: "Cerrados", value: kpis.cerrado },
+        { label: "En proyecto", value: kpis.enProyecto },
+      ]
+    : []
+  return (
+    <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      {(kpis ? items : Array.from({ length: 6 })).map((it, i) => (
+        <div key={it ? (it as any).label : i} className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-center">
+          <p className="font-display text-2xl font-bold text-yellow">{it ? (it as any).value : "—"}</p>
+          <p className="mt-0.5 text-[11px] leading-tight text-cream/60">{it ? (it as any).label : "Cargando..."}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Slider de fotos de casos — pedido de Josecito 22/09/2026: "así le damos
+ * entidad y el voluntario VE algo más que texto". Auto-avanza cada 5s
+ * (pausa al tocar/hacer hover), foto sin deformar (`object-cover` dentro
+ * de un marco de proporción fija) + nombre abajo, tap/click abre el caso.
+ * Muestra hasta 12 casos activos más recientes (con foto o el placeholder
+ * de persona si no la sacaron) — no solo los que tienen foto, para no dar
+ * la falsa impresión de "pocos casos cargados".
+ */
+function CasosSlider({ cases, onOpen }: { cases: CaseListItem[]; onOpen: (id: string) => void }) {
+  const items = useMemo(
+    () =>
+      cases
+        .filter((c) => c.status !== "cerrado")
+        .slice(0, 12),
+    [cases],
+  )
+  const [index, setIndex] = useState(0)
+  const [paused, setPaused] = useState(false)
+  const trackRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (paused || items.length <= 1) return
+    const t = setInterval(() => setIndex((i) => (i + 1) % items.length), 4000)
+    return () => clearInterval(t)
+  }, [paused, items.length])
+
+  useEffect(() => {
+    setIndex(0)
+  }, [items.length])
+
+  if (items.length === 0) return null
+
+  return (
+    <div
+      className="mb-5 overflow-hidden rounded-xl border border-white/10 bg-white/5 p-3"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onTouchStart={() => setPaused(true)}
+    >
+      <div
+        ref={trackRef}
+        className="flex gap-3 transition-transform duration-500 ease-out"
+        style={{ transform: `translateX(calc(-${index} * (7.5rem + 0.75rem)))` }}
+      >
+        {items.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onOpen(c.id)}
+            className="flex w-30 shrink-0 flex-col items-center gap-1.5 text-center"
+            style={{ width: "7.5rem" }}
+          >
+            <CaseAvatarFrame url={c.mainPhotoUrl} name={c.fullName} size="lg" />
+            <span className="line-clamp-1 text-xs font-medium text-cream">{c.fullName}</span>
+          </button>
+        ))}
+      </div>
+      {items.length > 1 && (
+        <div className="mt-2 flex justify-center gap-1">
+          {items.map((c, i) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setIndex(i)}
+              aria-label={`Ir a la foto ${i + 1}`}
+              className={`h-1.5 rounded-full transition-all ${i === index ? "w-4 bg-yellow" : "w-1.5 bg-white/20"}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -143,52 +298,154 @@ function PhotoLightbox({
 }
 
 export function Listado({ canWrite, openCaseId }: { canWrite: boolean; openCaseId?: string | null }) {
+  const router = useRouter()
   const [cases, setCases] = useState<CaseListItem[] | null>(null)
+  const [kpis, setKpis] = useState<CaseKpis | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState<CaseStatus | "">("")
   const [selectedId, setSelectedId] = useState<string | null>(openCaseId ?? null)
 
-  function refresh(status?: CaseStatus | "") {
-    listCases(status || undefined)
+  // Fase K "Casos II" — buscador + filtros (pedido de Josecito 22/09/2026):
+  // antes solo existía el chip de estado. `filters` se manda tal cual a
+  // listCases(), que arma el query string.
+  const [filters, setFilters] = useState<CaseListFilters>({})
+  const [searchInput, setSearchInput] = useState("")
+  const [showMoreFilters, setShowMoreFilters] = useState(false)
+
+  function refresh(next: CaseListFilters = filters) {
+    listCases(next)
       .then(setCases)
       .catch((e) => setError(e.message))
   }
 
+  function refreshKpis() {
+    getCaseKpis()
+      .then(setKpis)
+      .catch(() => {
+        /* los KPIs son un plus visual — si falla la cabecera, el listado igual funciona */
+      })
+  }
+
   useEffect(() => {
-    refresh()
+    refresh({})
+    refreshKpis()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Debounce del buscador de texto (nombre/alias/dni) — evita un request
+  // por tecla; 400ms alcanza para no sentirse lento en 3G de calle.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const next = { ...filters, q: searchInput }
+      setFilters(next)
+      refresh(next)
+    }, 400)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput])
 
   useEffect(() => {
     if (openCaseId) setSelectedId(openCaseId)
   }, [openCaseId])
 
+  function applyFilter(patch: Partial<CaseListFilters>) {
+    const next = { ...filters, ...patch }
+    setFilters(next)
+    refresh(next)
+  }
+
   if (!cases) return <p className="text-cream/50">Cargando...</p>
 
   return (
     <div>
+      <CasosKpis kpis={kpis} />
+      <CasosSlider cases={cases} onOpen={setSelectedId} />
+
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Buscar por nombre, alias o DNI..."
+          className="w-full flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow sm:max-w-xs"
+        />
+        <button
+          type="button"
+          onClick={() => setShowMoreFilters((v) => !v)}
+          className="shrink-0 rounded-lg border border-white/20 px-3 py-2 text-xs font-medium text-cream/70 hover:bg-white/10"
+        >
+          {showMoreFilters ? "Ocultar filtros" : "Más filtros"}
+        </button>
+      </div>
+
+      {showMoreFilters && (
+        <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-white/5 p-3 sm:grid-cols-4">
+          <label className="text-xs text-cream/60">
+            Desde
+            <input
+              type="date"
+              value={filters.dateFrom ?? ""}
+              onChange={(e) => applyFilter({ dateFrom: e.target.value || undefined })}
+              className="mt-1 w-full rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-cream outline-none focus:border-yellow"
+            />
+          </label>
+          <label className="text-xs text-cream/60">
+            Hasta
+            <input
+              type="date"
+              value={filters.dateTo ?? ""}
+              onChange={(e) => applyFilter({ dateTo: e.target.value || undefined })}
+              className="mt-1 w-full rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-cream outline-none focus:border-yellow"
+            />
+          </label>
+          <label className="text-xs text-cream/60">
+            Tipo de caso
+            <select
+              value={filters.caseType ?? ""}
+              onChange={(e) => applyFilter({ caseType: (e.target.value || "") as CaseListFilters["caseType"] })}
+              className="mt-1 w-full rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-cream outline-none focus:border-yellow"
+            >
+              <option value="" className="bg-purple-deep">Todos</option>
+              {CASE_TYPES.map((t) => (
+                <option key={t} value={t} className="bg-purple-deep">
+                  {CASE_TYPE_LABEL[t]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-cream/60">
+            Sexo
+            <input
+              value={filters.sex ?? ""}
+              onChange={(e) => applyFilter({ sex: e.target.value || undefined })}
+              placeholder="Ej: F, M"
+              className="mt-1 w-full rounded-lg border border-white/20 bg-white/5 px-2 py-1.5 text-cream outline-none focus:border-yellow"
+            />
+          </label>
+        </div>
+      )}
+
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
-          onClick={() => {
-            setStatusFilter("")
-            refresh("")
-          }}
-          className={`rounded-full px-3 py-1.5 text-xs font-medium ${statusFilter === "" ? "bg-yellow text-purple-deep" : "bg-white/10 text-cream/70"}`}
+          onClick={() => applyFilter({ status: "" })}
+          className={`rounded-full px-3 py-1.5 text-xs font-medium ${!filters.status ? "bg-yellow text-purple-deep" : "bg-white/10 text-cream/70"}`}
         >
           Todos
         </button>
         {CASE_STATUSES.map((s) => (
           <button
             key={s}
-            onClick={() => {
-              setStatusFilter(s)
-              refresh(s)
-            }}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium ${statusFilter === s ? "bg-yellow text-purple-deep" : "bg-white/10 text-cream/70"}`}
+            onClick={() => applyFilter({ status: s })}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium ${filters.status === s ? "bg-yellow text-purple-deep" : "bg-white/10 text-cream/70"}`}
           >
             {CASE_STATUS_LABEL[s]}
           </button>
         ))}
+        <span className="mx-1 h-4 w-px bg-white/15" />
+        <button
+          onClick={() => applyFilter({ linkedToProject: filters.linkedToProject ? undefined : true })}
+          className={`rounded-full px-3 py-1.5 text-xs font-medium ${filters.linkedToProject ? "bg-yellow text-purple-deep" : "bg-white/10 text-cream/70"}`}
+        >
+          Vinculados a Proyecto
+        </button>
       </div>
 
       {error && <p className="mb-4 text-sm text-orange">{error}</p>}
@@ -206,9 +463,24 @@ export function Listado({ canWrite, openCaseId }: { canWrite: boolean; openCaseI
                 <span className="text-sm font-medium text-cream">{c.fullName}</span>
                 {c.alias && <span className="text-xs text-cream/50">({c.alias})</span>}
               </div>
-              <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[c.status]}`}>
-                {CASE_STATUS_LABEL[c.status]}
-              </span>
+              <div className="flex items-center gap-1.5">
+                {c.projectId && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      router.push(`/proyectos/${c.projectId}`)
+                    }}
+                    className="rounded-full bg-yellow px-2 py-0.5 text-[11px] font-semibold text-purple-deep hover:brightness-95"
+                  >
+                    En proyecto →
+                  </span>
+                )}
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[c.status]}`}>
+                  {CASE_STATUS_LABEL[c.status]}
+                </span>
+              </div>
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-cream/50">
               <span>{CASE_TYPE_LABEL[c.caseType]}</span>
@@ -227,7 +499,10 @@ export function Listado({ canWrite, openCaseId }: { canWrite: boolean; openCaseI
           id={selectedId}
           canWrite={canWrite}
           onClose={() => setSelectedId(null)}
-          onChanged={() => refresh(statusFilter)}
+          onChanged={() => {
+            refresh()
+            refreshKpis()
+          }}
         />
       )}
     </div>
@@ -255,6 +530,8 @@ function CaseDetailModal({
   const [showCloseForm, setShowCloseForm] = useState(false)
   const [newSkillLabel, setNewSkillLabel] = useState("")
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const router = useRouter()
+  const [exporting, setExporting] = useState<"descarga" | "compartir" | null>(null)
 
   function load() {
     getCase(id)
@@ -293,6 +570,85 @@ function CaseDetailModal({
     }
   }
 
+  /**
+   * Perfil de caso a PDF + auditoría mínima de quién lo bajó (pedido de
+   * Josecito: "exportar el ... perfil del caso a pdf ... con una
+   * auditoría de quien baja información"). El log se manda ANTES de armar
+   * el archivo — así queda registrado el intento aunque jsPDF falle.
+   */
+  function toPdfInput(d: CaseDetail): CasePdfInput {
+    return {
+      caseNumber: d.caseNumber,
+      fullName: d.fullName,
+      alias: d.alias,
+      statusLabel: CASE_STATUS_LABEL[d.status],
+      caseTypeLabel: CASE_TYPE_LABEL[d.caseType],
+      approxAge: d.approxAge,
+      sex: d.sex,
+      dni: d.dni,
+      phone: d.phone,
+      dayZone: d.dayZone,
+      currentSleepSpot: d.currentSleepSpot,
+      viabilityLabel: d.viability ? VIABILITY_LABEL[d.viability] : null,
+      feasibilityLabel: d.feasibility ? FEASIBILITY_LABEL[d.feasibility] : null,
+      healthStatus: d.healthStatus,
+      legalSituation: d.legalSituation,
+      substanceUse: d.substanceUse,
+      closeReason: d.status === "cerrado" ? d.closeReason : null,
+      linkedProjects: d.projects.map((p) => ({ code: p.code, name: p.name })),
+      needs: d.needs.map((n) => ({
+        label: `${NEED_CATEGORY_LABEL[n.category]} · ${NEED_URGENCY_LABEL[n.urgency]}${n.notes ? ` — ${n.notes}` : ""}`,
+        resolved: Boolean(n.resolvedAt),
+      })),
+      recentContacts: d.contactsHistory.map((c) => ({
+        date: formatDateTime(c.contactedAt),
+        author: c.user?.name ?? "—",
+        notes: c.notes,
+      })),
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (!detail) return
+    setExporting("descarga")
+    try {
+      await logCaseExport(id, "descarga").catch(() => {})
+      await downloadCasePdf(toPdfInput(detail))
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  async function handleSharePdf() {
+    if (!detail) return
+    setExporting("compartir")
+    try {
+      await logCaseExport(id, "compartir").catch(() => {})
+      const file = await getCasePdfFile(toPdfInput(detail))
+      if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: `Caso ${detail.caseNumber}`, text: detail.fullName })
+      } else {
+        // Sin Web Share API con archivos (desktop, navegadores viejos) —
+        // se descarga igual, así la persona lo adjunta a mano por
+        // WhatsApp Web / email.
+        const url = URL.createObjectURL(file)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = file.name
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        URL.revokeObjectURL(url)
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setError(e.message ?? "No se pudo compartir el PDF")
+    } finally {
+      setExporting(null)
+    }
+  }
+
   if (!detail) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -306,14 +662,49 @@ function CaseDetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/15 bg-purple-deep p-6">
-        <div className="mb-4 flex items-start justify-between">
-          <div>
-            <p className="text-xs text-cream/40">{detail.caseNumber}</p>
-            <h2 className="font-display text-xl font-bold text-yellow">{detail.fullName}</h2>
-            {detail.alias && <p className="text-sm text-cream/60">({detail.alias})</p>}
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            {/* Marco de foto (o ícono de persona si no hay) + datos al
+             * costado — pedido explícito de Josecito para el popup del
+             * caso, siguiendo el tratamiento de fotografía del manual de
+             * marca (caja rectangular, sin marcos redondeados ni sombras). */}
+            <CaseAvatarFrame url={detail.mainPhotoUrl} name={detail.fullName} size="md" />
+            <div>
+              <p className="text-xs text-cream/40">{detail.caseNumber}</p>
+              <h2 className="font-display text-xl font-bold text-yellow">{detail.fullName}</h2>
+              {detail.alias && <p className="text-sm text-cream/60">({detail.alias})</p>}
+              {detail.projects.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/proyectos/${detail.projects[0].id}`)}
+                  className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-yellow px-2.5 py-0.5 text-[11px] font-semibold text-purple-deep hover:brightness-95"
+                >
+                  En proyecto · {detail.projects[0].code} →
+                </button>
+              )}
+            </div>
           </div>
           <button onClick={onClose} className="text-cream/50 hover:text-cream">
             ✕
+          </button>
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={exporting !== null}
+            className="rounded-lg border border-yellow/40 px-3 py-1.5 text-xs font-medium text-yellow hover:bg-yellow/10 disabled:opacity-50"
+          >
+            {exporting === "descarga" ? "Generando..." : "Descargar PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={handleSharePdf}
+            disabled={exporting !== null}
+            className="rounded-lg border border-white/20 px-3 py-1.5 text-xs font-medium text-cream/80 hover:bg-white/10 disabled:opacity-50"
+          >
+            {exporting === "compartir" ? "Generando..." : "Compartir (WhatsApp / email)"}
           </button>
         </div>
 
@@ -354,9 +745,9 @@ function CaseDetailModal({
           </div>
         )}
 
-        <div className="mb-4 grid grid-cols-2 gap-3">
+        <div className="mb-1 grid grid-cols-2 gap-3">
           <label className="block text-sm">
-            <span className="mb-1 block text-cream/60">Viabilidad</span>
+            <span className="mb-1 block text-cream/60">Viabilidad (de la persona)</span>
             <select
               disabled={!canWrite}
               value={detail.viability ?? ""}
@@ -372,7 +763,7 @@ function CaseDetailModal({
             </select>
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block text-cream/60">Factibilidad</span>
+            <span className="mb-1 block text-cream/60">Factibilidad (de intervenir ahora)</span>
             <select
               disabled={!canWrite}
               value={detail.feasibility ?? ""}
@@ -388,6 +779,11 @@ function CaseDetailModal({
             </select>
           </label>
         </div>
+        <p className="mb-4 text-[11px] leading-snug text-cream/40">
+          Viabilidad: qué tan posible es ayudar a esta persona a salir de la situación (salud, redes, voluntad
+          propia). Factibilidad: si Vida Solidaria puede intervenir AHORA con el equipo/recursos disponibles.
+          Con cualquiera de las dos en "alta/media" o "factible", el caso pasa solo a Proyecto.
+        </p>
 
         <dl className="mb-4 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
           <dt className="text-cream/50">Tipo</dt>
