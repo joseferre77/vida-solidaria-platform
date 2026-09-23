@@ -291,19 +291,102 @@ async function serializeStockItem(item: {
   }
 }
 
+/**
+ * Serializa TODO el catálogo de una sola pasada, sin N+1.
+ *
+ * `serializeStockItem` (arriba) hace 2 queries de `aggregate` por insumo
+ * más una de `userMapFor` por cada custodia activa — perfecto para los
+ * endpoints de UN insumo (crear/editar/movimiento), pero /stock-items y
+ * /stock-summary lo aplicaban con `Promise.all(items.map(...))` sobre TODO
+ * el catálogo: con ~100 insumos (lo que quedó después de Fase L — catálogo
+ * inicial + kit semanal + equipamiento) eso son ~400 queries concurrentes
+ * contra el pooler de Supabase en cada uno de los dos endpoints, que la
+ * pantalla de Stock pide en paralelo al entrar — de ahí que se quedara
+ * "cargando" sin terminar de traer nada. Acá se resuelve todo el catálogo
+ * con 2 queries en total: un `groupBy` de movimientos (para la cantidad
+ * neta de cada insumo) y un `userMapFor` con todos los holders de una vez.
+ */
+async function serializeStockItemsBatch(
+  items: {
+    id: string
+    code: string
+    name: string
+    unit: string
+    category: string | null
+    icon: string | null
+    isReusable: boolean
+    unitCost: unknown
+    reorderPoint: unknown
+    restockTarget: unknown
+    createdAt: Date
+    custodies: { id: string; holderUserId: string; quantity: unknown; notes: string | null; checkedOutAt: Date }[]
+  }[],
+) {
+  const nonReusableIds = items.filter((i) => !i.isReusable).map((i) => i.id)
+  const [movementSums, users] = await Promise.all([
+    nonReusableIds.length > 0
+      ? prisma.stockMovement.groupBy({
+          by: ["stockItemId", "type"],
+          where: { stockItemId: { in: nonReusableIds } },
+          _sum: { quantity: true },
+        })
+      : Promise.resolve([]),
+    userMapFor(items.flatMap((i) => (i.custodies[0] ? [i.custodies[0].holderUserId] : []))),
+  ])
+
+  const qtyMap = new Map<string, number>()
+  for (const row of movementSums) {
+    const amount = Number(row._sum.quantity ?? 0)
+    const delta = row.type === "ingreso" ? amount : -amount
+    qtyMap.set(row.stockItemId, (qtyMap.get(row.stockItemId) ?? 0) + delta)
+  }
+
+  return items.map((item) => {
+    const active = item.custodies[0] ?? null
+    const qty = item.isReusable ? null : (qtyMap.get(item.id) ?? 0)
+    const unitCost = item.unitCost === null ? null : Number(item.unitCost)
+    const reorderPoint = item.reorderPoint === null ? null : Number(item.reorderPoint)
+    return {
+      id: item.id,
+      code: item.code,
+      name: item.name,
+      unit: item.unit,
+      category: item.category,
+      icon: item.icon,
+      isReusable: item.isReusable,
+      unitCost,
+      reorderPoint,
+      restockTarget: item.restockTarget === null ? null : Number(item.restockTarget),
+      createdAt: item.createdAt,
+      currentQuantity: qty,
+      totalValue: qty !== null && unitCost !== null ? qty * unitCost : null,
+      belowReorderPoint: qty !== null && reorderPoint !== null ? qty <= reorderPoint : false,
+      activeCustody: active
+        ? {
+            id: active.id,
+            holder: users.get(active.holderUserId) ?? null,
+            quantity: active.quantity,
+            notes: active.notes,
+            checkedOutAt: active.checkedOutAt,
+          }
+        : null,
+    }
+  })
+}
+
 export async function logisticsRoutes(app: FastifyInstance) {
   // ── Insumos (catálogo: materia prima, descartables, equipamiento
   // reusable con `isReusable: true`) ──
   app.get("/stock-items", { preHandler: [requireAuth, requirePermission("logistics.read")] }, async () => {
     const items = await prisma.stockItem.findMany({ include: STOCK_ITEM_INCLUDE, orderBy: { name: "asc" } })
-    return Promise.all(items.map(serializeStockItem))
+    return serializeStockItemsBatch(items)
   })
 
   // ── KPIs de stock para el panel (valuación total, insumos bajo punto de
   // pedido, equipamiento reusable actualmente prestado) ──
   app.get("/stock-summary", { preHandler: [requireAuth, requirePermission("logistics.read")] }, async () => {
     const items = await prisma.stockItem.findMany({ include: STOCK_ITEM_INCLUDE })
-    const serialized = await Promise.all(items.map(serializeStockItem))
+    const serialized = await serializeStockItemsBatch(items)
     return {
       totalItems: serialized.length,
       totalValuation: serialized.reduce((sum, i) => sum + (i.totalValue ?? 0), 0),
