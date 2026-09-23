@@ -374,6 +374,58 @@ async function serializeStockItemsBatch(
   })
 }
 
+/**
+ * Mismo problema que serializeStockItemsBatch, pero para lotes de cocina:
+ * /kitchen-batches no tiene límite (trae TODOS los lotes de la historia) y
+ * serializeBatch hace su propio userMapFor por lote — nadie lo reportó
+ * trabado todavía porque hoy hay muchos menos lotes que insumos de stock,
+ * pero es la misma bomba de tiempo (crece sin tope) y ya sabemos cómo
+ * termina. Se arregla acá de una: un solo userMapFor con los holders de
+ * TODOS los lotes, en vez de uno por lote.
+ */
+async function serializeBatchesBatch(batches: Parameters<typeof serializeBatch>[0][]) {
+  const users = await userMapFor(
+    batches.flatMap((b) => [
+      b.createdBy,
+      b.responsibleUserId,
+      ...b.assignees.map((a) => a.userId),
+      ...b.statusHistory.map((h) => h.changedBy),
+      ...b.custodies.map((c) => c.holderUserId),
+    ]),
+  )
+  return batches.map((batch) => ({
+    id: batch.id,
+    name: batch.name,
+    targetServings: batch.targetServings,
+    status: batch.status,
+    createdAt: batch.createdAt,
+    createdBy: users.get(batch.createdBy) ?? null,
+    responsible: batch.responsibleUserId ? (users.get(batch.responsibleUserId) ?? null) : null,
+    ingredients: batch.ingredients.map((i) => ({
+      stockItemId: i.stockItemId,
+      stockItemName: i.stockItem.name,
+      unit: i.stockItem.unit,
+      quantityAssigned: i.quantityAssigned,
+    })),
+    assignees: batch.assignees.map((a) => ({ ...users.get(a.userId), taskLabel: a.taskLabel })),
+    statusHistory: batch.statusHistory.map((h) => ({
+      toStatus: h.toStatus,
+      changedAt: h.changedAt,
+      changedBy: users.get(h.changedBy) ?? null,
+    })),
+    equipment: batch.custodies.map((c) => ({
+      custodyId: c.id,
+      stockItemId: c.stockItemId,
+      stockItemName: c.stockItem.name,
+      unit: c.stockItem.unit,
+      quantity: c.quantity,
+      holder: users.get(c.holderUserId) ?? null,
+      checkedOutAt: c.checkedOutAt,
+      returnedAt: c.returnedAt,
+    })),
+  }))
+}
+
 export async function logisticsRoutes(app: FastifyInstance) {
   // ── Insumos (catálogo: materia prima, descartables, equipamiento
   // reusable con `isReusable: true`) ──
@@ -459,8 +511,14 @@ export async function logisticsRoutes(app: FastifyInstance) {
   // actual; si más adelante hace falta rastrear "quién resolvió cuál y
   // cuándo" hay que sumar un modelo propio.
   app.get("/stock-alerts", { preHandler: [requireAuth, requirePermission("logistics.read")] }, async () => {
+    // Mismo fix de N+1 que /stock-items y /stock-summary (ver
+    // serializeStockItemsBatch) — esta ruta tenía el mismo
+    // Promise.all(items.map(serializeStockItem)) y se me pasó la primera
+    // vez porque acá se pasa la función SIN llamarla (.map(serializeStockItem),
+    // no .map((i) => serializeStockItem(i))), así que no aparecía en una
+    // búsqueda de "serializeStockItem(".
     const items = await prisma.stockItem.findMany({ where: { isReusable: false }, include: STOCK_ITEM_INCLUDE })
-    const serialized = await Promise.all(items.map(serializeStockItem))
+    const serialized = await serializeStockItemsBatch(items)
     return {
       sinStock: serialized.filter((i) => (i.currentQuantity ?? 0) <= 0),
       bajo: serialized.filter((i) => i.belowReorderPoint && (i.currentQuantity ?? 0) > 0),
@@ -682,7 +740,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
   // ── Lotes de cocina ──
   app.get("/kitchen-batches", { preHandler: [requireAuth, requirePermission("logistics.read")] }, async () => {
     const batches = await prisma.kitchenBatch.findMany({ include: BATCH_INCLUDE, orderBy: { createdAt: "desc" } })
-    return Promise.all(batches.map(serializeBatch))
+    return serializeBatchesBatch(batches)
   })
 
   // Fase L — "tablero del voluntario": el propio asignado (responsable o
@@ -697,7 +755,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
       orderBy: { createdAt: "desc" },
       take: 20,
     })
-    return Promise.all(batches.map(serializeBatch))
+    return serializeBatchesBatch(batches)
   })
 
   app.get("/kitchen-batches/:id", { preHandler: [requireAuth, requirePermission("logistics.read")] }, async (request) => {
