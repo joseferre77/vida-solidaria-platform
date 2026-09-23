@@ -6,6 +6,7 @@ import {
   AVAILABLE_DAYS,
   AVAILABLE_DAY_LABEL,
   createUser,
+  deleteUser,
   listRoles,
   listUsers,
   rejectUser,
@@ -25,6 +26,10 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rechazado",
 }
 
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })
+}
+
 /**
  * Fase H — panel de administración de personas. Hasta ahora la única forma
  * de crear un usuario era a mano vía `prisma/seed.ts` (un solo admin en
@@ -39,9 +44,14 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
   const [showForm, setShowForm] = useState(false)
   const [editingRolesFor, setEditingRolesFor] = useState<UserItem | null>(null)
   const [editingProfileFor, setEditingProfileFor] = useState<UserItem | null>(null)
+  const [viewingProfileFor, setViewingProfileFor] = useState<UserItem | null>(null)
+  const [deletingFor, setDeletingFor] = useState<UserItem | null>(null)
   const [lastGeneratedPassword, setLastGeneratedPassword] = useState<{ email: string; password: string } | null>(
     null,
   )
+  const [search, setSearch] = useState("")
+  const [roleFilter, setRoleFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState("")
 
   function refresh() {
     listUsers()
@@ -59,7 +69,14 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
   if (!users || !roles) return <p className="text-cream/50">Cargando...</p>
 
   const pendingUsers = users.filter((u) => u.status === "pending")
-  const tableUsers = users.filter((u) => u.status !== "pending")
+  const q = search.trim().toLowerCase()
+  const tableUsers = users
+    .filter((u) => u.status !== "pending")
+    .filter((u) => !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+    .filter((u) => !roleFilter || u.roles.some((r) => r.slug === roleFilter))
+    .filter((u) => !statusFilter || u.status === statusFilter)
+  const allTableUsers = users.filter((u) => u.status !== "pending")
+  const hasActiveFilters = q !== "" || roleFilter !== "" || statusFilter !== ""
 
   return (
     <div className="max-w-4xl">
@@ -92,6 +109,7 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs text-cream/50">
           {tableUsers.length} {tableUsers.length === 1 ? "persona registrada" : "personas registradas"}
+          {hasActiveFilters && ` de ${allTableUsers.length}`}
         </p>
         <button
           onClick={() => setShowForm(true)}
@@ -99,6 +117,55 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
         >
           + Nuevo usuario
         </button>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nombre o email..."
+          className="min-w-[200px] flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow"
+        />
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value)}
+          className="rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow"
+        >
+          <option value="" className="bg-papel text-tinta">
+            Todos los roles
+          </option>
+          {roles.map((r) => (
+            <option key={r.slug} value={r.slug} className="bg-papel text-tinta">
+              {r.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow"
+        >
+          <option value="" className="bg-papel text-tinta">
+            Todos los estados
+          </option>
+          {(["active", "suspended", "rejected"] as const).map((s) => (
+            <option key={s} value={s} className="bg-papel text-tinta">
+              {STATUS_LABEL[s]}
+            </option>
+          ))}
+        </select>
+        {hasActiveFilters && (
+          <button
+            onClick={() => {
+              setSearch("")
+              setRoleFilter("")
+              setStatusFilter("")
+            }}
+            className="rounded-lg border border-white/20 px-3 py-2 text-sm text-cream/60 hover:bg-white/5"
+          >
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       {error && <p className="mb-4 text-sm text-orange">{error}</p>}
@@ -143,9 +210,15 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
           </thead>
           <tbody>
             {tableUsers.map((u) => (
-              <tr key={u.id} className="border-b border-white/5">
+              <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.03]">
                 <td className="px-4 py-3 text-cream">
-                  {u.name}
+                  <button
+                    onClick={() => setViewingProfileFor(u)}
+                    className="text-left hover:text-yellow hover:underline"
+                    title="Ver ficha"
+                  >
+                    {u.name}
+                  </button>
                   {u.id === currentUserId && <span className="ml-1.5 text-[11px] text-cream/40">(vos)</span>}
                 </td>
                 <td className="px-4 py-3 text-cream/70">{u.email}</td>
@@ -186,6 +259,10 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">
+                  <button onClick={() => setViewingProfileFor(u)} className="text-xs text-yellow hover:underline">
+                    Ver perfil
+                  </button>
+                  <span className="mx-1.5 text-cream/20">·</span>
                   <button onClick={() => setEditingProfileFor(u)} className="text-xs text-yellow hover:underline">
                     Editar perfil
                   </button>
@@ -193,13 +270,26 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
                   <button onClick={() => setEditingRolesFor(u)} className="text-xs text-yellow hover:underline">
                     Editar roles
                   </button>
+                  {u.id !== currentUserId && (
+                    <>
+                      <span className="mx-1.5 text-cream/20">·</span>
+                      <button
+                        onClick={() => setDeletingFor(u)}
+                        className="text-xs text-orange/80 hover:text-orange hover:underline"
+                      >
+                        Eliminar
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
             {tableUsers.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-cream/50">
-                  Todavía no hay usuarios registrados.
+                  {allTableUsers.length === 0
+                    ? "Todavía no hay usuarios registrados."
+                    : "Ningún usuario coincide con el filtro."}
                 </td>
               </tr>
             )}
@@ -241,6 +331,32 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
             refresh()
           }}
           onError={setError}
+        />
+      )}
+
+      {viewingProfileFor && (
+        <ViewProfileModal
+          user={viewingProfileFor}
+          onClose={() => setViewingProfileFor(null)}
+          onEditProfile={() => {
+            setEditingProfileFor(viewingProfileFor)
+            setViewingProfileFor(null)
+          }}
+          onEditRoles={() => {
+            setEditingRolesFor(viewingProfileFor)
+            setViewingProfileFor(null)
+          }}
+        />
+      )}
+
+      {deletingFor && (
+        <DeleteUserModal
+          user={deletingFor}
+          onClose={() => setDeletingFor(null)}
+          onDeleted={() => {
+            setDeletingFor(null)
+            refresh()
+          }}
         />
       )}
     </div>
@@ -818,6 +934,230 @@ function EditRolesModal({
             className="rounded-xl bg-yellow px-4 py-2 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
           >
             {saving ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Ficha de usuario — a pedido de Josecito ("poder clickear el usuario para
+ * ver su ficha, además del botón editar perfil uno que sea ver perfil
+ * usuario"). Solo lectura, con los mismos datos que ya se cargan hoy vía
+ * Editar perfil — desde acá se puede saltar directo a editar perfil o
+ * roles sin tener que cerrar y volver a buscar a la persona en la tabla.
+ */
+function ViewProfileModal({
+  user,
+  onClose,
+  onEditProfile,
+  onEditRoles,
+}: {
+  user: UserItem
+  onClose: () => void
+  onEditProfile: () => void
+  onEditRoles: () => void
+}) {
+  const days = new Set(user.availableDays)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/15 bg-purple-deep p-6">
+        <div className="mb-1 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {user.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={user.avatarUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
+            ) : (
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-sm font-semibold text-cream/60">
+                {user.name
+                  .trim()
+                  .split(/\s+/)
+                  .map((p) => p[0])
+                  .slice(0, 2)
+                  .join("")
+                  .toUpperCase()}
+              </span>
+            )}
+            <div>
+              <h2 className="font-display text-lg font-bold text-yellow">{user.name}</h2>
+              <p className="text-xs text-cream/50">{user.email}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-cream/40 hover:text-cream">
+            ✕
+          </button>
+        </div>
+
+        <div className="mb-4 mt-3 flex flex-wrap items-center gap-1.5">
+          <span
+            className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+              user.status === "active"
+                ? "bg-green-500/20 text-green-300"
+                : user.status === "suspended"
+                  ? "bg-orange/20 text-orange"
+                  : "bg-white/10 text-cream/50"
+            }`}
+          >
+            {STATUS_LABEL[user.status]}
+          </span>
+          {user.roles.map((r) => (
+            <span key={r.slug} className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] text-cream/80">
+              {r.label}
+            </span>
+          ))}
+        </div>
+
+        <dl className="space-y-3 border-t border-white/10 pt-3 text-sm">
+          <ProfileRow label="Teléfono" value={user.phone} />
+          <ProfileRow label="Teléfono alternativo" value={user.phoneAlt} />
+          <ProfileRow label="Domicilio" value={user.address} />
+          <ProfileRow label="Fecha de nacimiento" value={user.birthDate ? formatDate(user.birthDate) : null} />
+          <ProfileRow label="Sexo" value={user.sex} />
+          <ProfileRow label="Habilidades" value={user.skills} multiline />
+          <div>
+            <dt className="mb-1 text-xs text-cream/50">Días disponibles</dt>
+            <dd>
+              {days.size > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {AVAILABLE_DAYS.map((d) => (
+                    <span
+                      key={d}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                        days.has(d) ? "bg-yellow text-purple-deep" : "bg-white/5 text-cream/30"
+                      }`}
+                    >
+                      {AVAILABLE_DAY_LABEL[d]}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-cream/40">—</span>
+              )}
+            </dd>
+          </div>
+          <ProfileRow label="Horarios disponibles" value={user.availableHours} />
+          <div>
+            <dt className="mb-1 text-xs text-cream/50">CV adjunto</dt>
+            <dd>
+              {user.cvUrl ? (
+                <a href={user.cvUrl} target="_blank" rel="noreferrer" className="text-yellow hover:underline">
+                  Ver CV
+                </a>
+              ) : (
+                <span className="text-cream/40">—</span>
+              )}
+            </dd>
+          </div>
+          <ProfileRow label="Miembro desde" value={formatDate(user.createdAt)} />
+        </dl>
+
+        <div className="mt-5 flex flex-wrap justify-end gap-3 border-t border-white/10 pt-4">
+          <button onClick={onClose} className="rounded-xl border border-white/20 px-4 py-2 text-sm hover:bg-white/5">
+            Cerrar
+          </button>
+          <button
+            onClick={onEditRoles}
+            className="rounded-xl border border-white/20 px-4 py-2 text-sm hover:bg-white/5"
+          >
+            Editar roles
+          </button>
+          <button
+            onClick={onEditProfile}
+            className="rounded-xl bg-yellow px-4 py-2 text-sm font-semibold text-purple-deep hover:opacity-90"
+          >
+            Editar perfil
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProfileRow({ label, value, multiline }: { label: string; value: string | null; multiline?: boolean }) {
+  return (
+    <div>
+      <dt className="mb-1 text-xs text-cream/50">{label}</dt>
+      <dd className={`text-cream ${multiline ? "whitespace-pre-wrap" : ""}`}>{value || <span className="text-cream/40">—</span>}</dd>
+    </div>
+  )
+}
+
+/**
+ * Baja definitiva — a diferencia del botón de estado (que solo
+ * activa/suspende), esto borra la fila de verdad y no se puede deshacer.
+ * Pide escribir el nombre para confirmar (misma fricción que un "escribí
+ * DELETE para confirmar", adaptado) porque es la única acción de este
+ * panel que pierde datos para siempre.
+ */
+function DeleteUserModal({
+  user,
+  onClose,
+  onDeleted,
+}: {
+  user: UserItem
+  onClose: () => void
+  onDeleted: () => void
+}) {
+  const [confirmText, setConfirmText] = useState("")
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const canDelete = confirmText.trim().toLowerCase() === user.name.trim().toLowerCase()
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-orange/40 bg-purple-deep p-6">
+        <h2 className="mb-1 font-display text-lg font-bold text-orange">Eliminar usuario definitivamente</h2>
+        <p className="mb-3 text-xs text-cream/50">{user.name} — {user.email}</p>
+
+        <div className="mb-4 space-y-2 rounded-lg border border-orange/30 bg-orange/10 p-3 text-xs text-cream/80">
+          <p>
+            Esto <strong className="text-orange">no se puede deshacer</strong>. Se van a borrar para siempre sus
+            mensajes del chat de coordinadores, sus roles, sus sesiones activas, su membresía en proyectos/tareas y
+            sus respuestas de encuestas.
+          </p>
+          <p>
+            En el historial de Stock, Cocina, Casos y Proyectos donde participó, va a quedar como{" "}
+            <strong>"—"</strong> en vez de su nombre (esos registros no se borran, solo pierden ese dato).
+          </p>
+          <p>Si no estás seguro, usá "Suspender" en la tabla en vez de esto — se puede reactivar cuando quieras.</p>
+        </div>
+
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block text-cream/70">
+            Escribí <strong className="text-cream">{user.name}</strong> para confirmar
+          </span>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-cream outline-none focus:border-orange"
+            autoFocus
+          />
+        </label>
+
+        {error && <p className="mb-3 text-sm text-orange">{error}</p>}
+
+        <div className="flex justify-end gap-3">
+          <button onClick={onClose} className="rounded-xl border border-white/20 px-4 py-2 text-sm hover:bg-white/5">
+            Cancelar
+          </button>
+          <button
+            disabled={!canDelete || deleting}
+            onClick={async () => {
+              setDeleting(true)
+              setError(null)
+              try {
+                await deleteUser(user.id)
+                onDeleted()
+              } catch (err: any) {
+                setError(err.message ?? "No se pudo eliminar")
+              } finally {
+                setDeleting(false)
+              }
+            }}
+            className="rounded-xl bg-orange px-4 py-2 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-40"
+          >
+            {deleting ? "Eliminando..." : "Eliminar definitivamente"}
           </button>
         </div>
       </div>

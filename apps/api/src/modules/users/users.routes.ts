@@ -14,6 +14,7 @@
 import crypto from "node:crypto"
 import type { FastifyInstance } from "fastify"
 import { z } from "zod"
+import { Prisma } from "@prisma/client"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
 import { hashPassword } from "../auth/auth.service"
@@ -328,4 +329,45 @@ export async function usersRoutes(app: FastifyInstance) {
       return serializeUser(user)
     },
   )
+
+  // ── Baja definitiva (a pedido de Josecito: el ABM de usuarios necesitaba
+  // un borrado real, no solo suspender). OJO — es intencionalmente un
+  // borrado de verdad, no un soft-delete: cascadea (se pierden para
+  // siempre) sus mensajes del chat de coordinadores, sus asignaciones de
+  // rol, sus sesiones activas, su membresía en proyectos/tareas, sus
+  // comentarios y registros de tiempo en tareas, y sus respuestas de
+  // encuestas — eso lo puede hacer Postgres solo porque esas tablas tienen
+  // FK con onDelete: Cascade. Lo que Postgres NO puede resolver solo son
+  // los campos que guardan el id como texto plano sin FK (quién creó un
+  // movimiento de stock, un caso, un lote de cocina, etc.) — esos quedan
+  // intactos pero van a mostrar "—" en vez del nombre, porque el id ya no
+  // resuelve a nadie. Y hay dos lugares con FK real pero SIN cascada
+  // (gastos y notas de proyecto) que van a bloquear el borrado de punta:
+  // ahí se atrapa el error de Postgres y se explica en criollo en vez de
+  // devolver el 500 crudo de Prisma.
+  app.delete("/users/:id", { preHandler: [requireAuth, requirePermission("users.manage")] }, async (request, reply) => {
+    const { id } = request.params as { id: string }
+
+    if (id === request.user!.sub) {
+      return reply.code(400).send({ error: "No podés eliminar tu propio usuario" })
+    }
+
+    try {
+      await prisma.user.delete({ where: { id } })
+      return reply.code(204).send()
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError) {
+        if (err.code === "P2025") {
+          return reply.code(404).send({ error: "Usuario no encontrado" })
+        }
+        if (err.code === "P2003") {
+          return reply.code(409).send({
+            error:
+              "No se puede eliminar: esta persona tiene gastos o notas de proyecto registrados a su nombre (se preservan por auditoría contable). Usá \"Suspender\" en su lugar.",
+          })
+        }
+      }
+      throw err
+    }
+  })
 }
