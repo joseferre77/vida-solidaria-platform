@@ -27,6 +27,7 @@ jobs:
           node-version: 20
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vida-solidaria/api exec prisma generate
       - run: pnpm --filter @vida-solidaria/api exec tsc --noEmit
       - run: pnpm --filter @vida-solidaria/web build
         env:
