@@ -70,7 +70,13 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
 
   if (!users || !roles) return <p className="text-cream/50">Cargando...</p>
 
-  const pendingUsers = users.filter((u) => u.status === "pending")
+  // Fase Q: un autorregistro desde /login (hasPassword true) recién entra
+  // acá cuando confirmó su email — antes de eso no aparece ni acá ni en la
+  // tabla de abajo (que también filtra status "pending"), porque la
+  // comisión no puede aprobar algo que la persona ni siquiera terminó de
+  // confirmar. El alta clásica del voluntariado (hasPassword false) sigue
+  // entrando directo, como siempre — nunca tuvo un paso de verificación.
+  const pendingUsers = users.filter((u) => u.status === "pending" && (!u.hasPassword || u.emailVerifiedAt))
   const q = search.trim().toLowerCase()
   const tableUsers = users
     .filter((u) => u.status !== "pending")

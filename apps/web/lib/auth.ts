@@ -33,6 +33,26 @@ export async function logout() {
   await rawFetch("/api/auth/logout", { method: "POST" })
 }
 
+// Fase Q: autorregistro público desde /login (voluntarios y demás
+// usuarios), con verificación de email antes de entrar a la cola de
+// aprobación de la comisión — ver apps/api .../public/public.routes.ts,
+// POST /public/register. No manda cookies de sesión (no hay sesión
+// todavía) — por eso usa fetch directo en vez de rawFetch, aunque igual
+// puede viajar con credentials "include" sin problema si algún día hace
+// falta (CORS ya está configurado para el dominio de gestión).
+export async function registerAccount(data: { name: string; email: string; password: string; phone: string }) {
+  const res = await fetch(`${API_URL}/api/public/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? "No se pudo completar el registro")
+  }
+  return res.json() as Promise<{ ok: true }>
+}
+
 /**
  * Si el access token venció pero el refresh_token todavía sirve (dura 30
  * días), reintenta una vez tras refrescar en vez de devolver null de

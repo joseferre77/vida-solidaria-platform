@@ -34,6 +34,11 @@ export interface UserItem {
   status: UserStatus
   volunteerMessage: string | null
   createdAt: string
+  // Fase Q: ver comentario en users.routes.ts serializeUser. emailVerifiedAt
+  // null + hasPassword true = autorregistro desde /login sin confirmar
+  // todavía (no debe aparecer en la cola de "Pendientes de aprobación").
+  emailVerifiedAt: string | null
+  hasPassword: boolean
   birthDate: string | null
   sex: string | null
   address: string | null

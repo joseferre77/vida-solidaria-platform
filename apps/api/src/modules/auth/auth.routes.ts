@@ -51,15 +51,20 @@ async function issueSessionCookies(reply: any, userId: string, meta: { userAgent
 
 export async function authRoutes(app: FastifyInstance) {
   // ── Login nativo (email + password) ──
-  // Nota: NO hay endpoint público de auto-registro. Los usuarios (voluntarios,
-  // coordinadores) se crean desde el panel de administración (users.manage),
-  // igual que en cualquier sistema interno de una organización — evita altas
-  // no autorizadas a un sistema que maneja datos sensibles de personas.
+  // Fase Q: además del alta manual desde /administracion, ahora existe
+  // autorregistro público con contraseña propia desde /login (ver
+  // modules/public/public.routes.ts, POST /public/register) con
+  // verificación de email y aprobación de la comisión antes de poder
+  // entrar — por eso el orden acá importa: primero se valida la
+  // contraseña (si es válida, sabemos que no es un desconocido adivinando
+  // emails al azar) y RECIÉN DESPUÉS se da un mensaje específico del
+  // estado de la cuenta. Dar el detalle antes de validar la contraseña
+  // permitiría a cualquiera confirmar si un email tiene cuenta registrada.
   app.post("/auth/login", async (request, reply) => {
     const body = loginSchema.parse(request.body)
     const user = await prisma.user.findUnique({ where: { email: body.email } })
 
-    if (!user || !user.passwordHash || user.status !== "active") {
+    if (!user || !user.passwordHash) {
       return reply.code(401).send({ error: "Credenciales inválidas" })
     }
 
@@ -68,11 +73,28 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.code(401).send({ error: "Credenciales inválidas" })
     }
 
-    const session = await issueSessionCookies(reply, user.id, {
-      userAgent: request.headers["user-agent"],
-      ip: request.ip,
-    })
-    return reply.send({ user: session })
+    if (user.status === "active") {
+      const session = await issueSessionCookies(reply, user.id, {
+        userAgent: request.headers["user-agent"],
+        ip: request.ip,
+      })
+      return reply.send({ user: session })
+    }
+
+    if (user.status === "pending" && !user.emailVerifiedAt) {
+      return reply.code(403).send({ error: "Confirmá tu email para continuar — te mandamos un link a tu casilla." })
+    }
+    if (user.status === "pending") {
+      return reply.code(403).send({ error: "Tu cuenta está esperando la aprobación de la comisión." })
+    }
+    if (user.status === "rejected") {
+      return reply.code(403).send({ error: "Tu solicitud no fue aprobada. Consultá con la comisión de Vida Solidaria." })
+    }
+    if (user.status === "suspended") {
+      return reply.code(403).send({ error: "Tu cuenta está suspendida. Consultá con la comisión." })
+    }
+
+    return reply.code(401).send({ error: "Credenciales inválidas" })
   })
 
   // ── Refresh: rota el refresh token y emite un access token nuevo ──

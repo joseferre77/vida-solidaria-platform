@@ -1,57 +1,75 @@
 /**
- * Fase K bloque A: alta pública de voluntarios.
+ * Fase K bloque A: alta pública de voluntarios (formulario del sitio
+ * vidasolidariamdp.com, sin contraseña — la pone la comisión al aprobar).
+ * Fase Q: autorregistro CON contraseña propia desde /login de la app de
+ * gestión, con verificación de email antes de entrar a la cola de
+ * aprobación de la comisión (ver /public/register y /public/verify-email
+ * más abajo). Son dos flujos distintos que conviven sobre la misma tabla
+ * `users` — se distinguen porque el de Fase Q siempre tiene `passwordHash`
+ * desde el alta y el de Fase K nunca lo tiene hasta que se aprueba.
  *
- * Único módulo de esta API que NO requiere autenticación — lo postea el
- * sitio estático vidasolidariamdp.com (dominio raíz, separado del
- * subdominio de gestión). Por eso:
- *  - Rate-limit propio en memoria (no hay @fastify/rate-limit instalado
- *    todavía y agregar una dependencia nueva para un solo endpoint no vale
- *    la pena) — 5 intentos por IP cada 15 minutos.
- *  - CORS: server.ts ahora acepta una lista de orígenes (ver env.ts /
- *    CORS_ORIGIN), no solo gestion.vidasolidariamdp.com.
- *  - No crea rol ni contraseña: el usuario queda `pending`, sin poder
- *    loguearse (passwordHash null), hasta que la comisión lo aprueba desde
- *    /administracion → Usuarios (ver users.routes.ts, POST .../approve).
+ * Único módulo de esta API que NO requiere autenticación — por eso:
+ *  - Rate-limit propio en memoria por endpoint (no hay @fastify/rate-limit
+ *    instalado todavía y agregar una dependencia nueva para un par de
+ *    endpoints no vale la pena) — 5 intentos por IP cada 15 minutos, cada
+ *    endpoint con su propio contador para que un flujo no bloquee al otro.
+ *  - CORS: server.ts acepta una lista de orígenes (ver env.ts / CORS_ORIGIN),
+ *    no solo gestion.vidasolidariamdp.com.
  */
 import type { FastifyInstance } from "fastify"
 import { z } from "zod"
 import { prisma } from "../../lib/prisma"
+import { env } from "../../config/env"
 import { sendEmail } from "../../lib/email"
 import { notify, usersWithPermission } from "../../lib/notify"
 import { verifyWeeklyConfirmToken } from "../../lib/confirm-token"
-import { brandEmailWrapper } from "../../lib/brand-email"
+import { signVerifyEmailToken, verifyVerifyEmailToken } from "../../lib/email-verify-token"
+import { brandEmailWrapper, brandButton } from "../../lib/brand-email"
+import { hashPassword } from "../auth/auth.service"
 
 const volunteerSignupSchema = z.object({
   name: z.string().trim().min(2, "Ingresá tu nombre completo").max(120),
-  email: z.string().trim().email("Ingresá un email válido"),
+  email: z.string().trim().toLowerCase().email("Ingresá un email válido"),
   phone: z.string().trim().min(6, "Ingresá un teléfono válido").max(30).optional(),
   message: z.string().trim().max(500).optional(),
 })
 
-// ── Rate limit en memoria: 5 intentos / 15 min por IP ──
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000
-const RATE_LIMIT_MAX = 5
-const attemptsByIp = new Map<string, { count: number; resetAt: number }>()
+const registerSchema = z.object({
+  name: z.string().trim().min(2, "Ingresá tu nombre completo").max(120),
+  email: z.string().trim().toLowerCase().email("Ingresá un email válido"),
+  password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres").max(72),
+  phone: z.string().trim().min(6, "Ingresá un teléfono válido").max(30),
+})
 
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now()
-  const entry = attemptsByIp.get(ip)
-  if (!entry || now > entry.resetAt) {
-    attemptsByIp.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+// ── Rate limit en memoria: factory para que cada endpoint público tenga su
+// propio contador de intentos por IP (ver comentario de arriba). ──
+function createRateLimiter(windowMs: number, max: number) {
+  const attempts = new Map<string, { count: number; resetAt: number }>()
+
+  setInterval(() => {
+    const now = Date.now()
+    for (const [ip, entry] of attempts) {
+      if (now > entry.resetAt) attempts.delete(ip)
+    }
+  }, windowMs).unref()
+
+  return function checkRateLimit(ip: string): boolean {
+    const now = Date.now()
+    const entry = attempts.get(ip)
+    if (!entry || now > entry.resetAt) {
+      attempts.set(ip, { count: 1, resetAt: now + windowMs })
+      return true
+    }
+    if (entry.count >= max) return false
+    entry.count += 1
     return true
   }
-  if (entry.count >= RATE_LIMIT_MAX) return false
-  entry.count += 1
-  return true
 }
 
-// Limpieza periódica para no acumular IPs viejas en memoria indefinidamente.
-setInterval(() => {
-  const now = Date.now()
-  for (const [ip, entry] of attemptsByIp) {
-    if (now > entry.resetAt) attemptsByIp.delete(ip)
-  }
-}, RATE_LIMIT_WINDOW_MS).unref()
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000
+const RATE_LIMIT_MAX = 5
+const checkVolunteerSignupRateLimit = createRateLimiter(RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX)
+const checkRegisterRateLimit = createRateLimiter(RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX)
 
 function welcomeEmailHtml(name: string) {
   return `
@@ -64,7 +82,6 @@ function welcomeEmailHtml(name: string) {
     </div>
   `
 }
-
 
 /** Página HTML mínima, sin la SPA (quien toca el link puede no tener
  * sesión abierta) pero con la identidad de marca — mismo criterio que
@@ -87,9 +104,33 @@ function brandStandalonePage(title: string, message: string): string {
 </body></html>`
 }
 
+/** Manda (o reenvía) el mail de verificación de Fase Q. Separado en función
+ * porque se usa tanto en el alta nueva como en el reintento de alguien que
+ * ya se había registrado pero nunca tocó el link. */
+async function sendVerificationEmail(userId: string, name: string, email: string) {
+  const token = signVerifyEmailToken(userId)
+  const link = `${env.PUBLIC_API_URL}/api/public/verify-email?token=${token}`
+  await sendEmail({
+    to: email,
+    subject: "Confirmá tu email — Vida Solidaria MDP",
+    html: brandEmailWrapper(
+      `<h2 style="margin:0 0 12px; font-size:19px;">¡Hola, ${name.split(" ")[0]}!</h2>
+       <p style="margin:0 0 8px; font-size:15px; line-height:1.5;">
+         Gracias por registrarte en el sistema de gestión de <strong>Vida Solidaria Mar del Plata</strong>.
+         Confirmá tu email para que la comisión pueda revisar tu alta.
+       </p>
+       ${brandButton("Confirmar mi email", link)}
+       <p style="font-size:13px; color:#2A1030; opacity:0.6; margin:16px 0 0;">
+         Si no pediste este registro, ignorá este mensaje.
+       </p>`,
+      "Confirmá tu email para completar tu registro",
+    ),
+  })
+}
+
 export async function publicRoutes(app: FastifyInstance) {
   app.post("/public/volunteer-signup", async (request, reply) => {
-    if (!checkRateLimit(request.ip)) {
+    if (!checkVolunteerSignupRateLimit(request.ip)) {
       return reply.code(429).send({ error: "Demasiados intentos. Probá de nuevo en un rato." })
     }
 
@@ -140,6 +181,113 @@ export async function publicRoutes(app: FastifyInstance) {
     )
 
     return reply.code(201).send({ ok: true })
+  })
+
+  // ── Fase Q: autorregistro desde /login, con contraseña elegida por la
+  // persona y verificación de email obligatoria ANTES de entrar a la cola
+  // de aprobación de la comisión (ver /public/verify-email). ──
+  app.post("/public/register", async (request, reply) => {
+    if (!checkRegisterRateLimit(request.ip)) {
+      return reply.code(429).send({ error: "Demasiados intentos. Probá de nuevo en un rato." })
+    }
+
+    const body = registerSchema.parse(request.body)
+    const existing = await prisma.user.findUnique({ where: { email: body.email } })
+
+    if (existing) {
+      // Reintento de alguien que ya se había registrado pero nunca tocó el
+      // link de verificación (se le perdió el mail, se equivocó de
+      // contraseña, etc.) — actualiza sus datos y reenvía el mail en vez de
+      // dejarlo trabado con un 409 sin salida.
+      if (existing.status === "pending" && !existing.emailVerifiedAt) {
+        const passwordHash = await hashPassword(body.password)
+        await prisma.user.update({
+          where: { id: existing.id },
+          data: { name: body.name, phone: body.phone, passwordHash },
+        })
+        await sendVerificationEmail(existing.id, body.name, existing.email)
+        return reply.code(201).send({ ok: true })
+      }
+
+      return reply.code(409).send({
+        error: "Ya existe una cuenta con ese email. Si es tuya, iniciá sesión o pedí ayuda a la comisión.",
+      })
+    }
+
+    const passwordHash = await hashPassword(body.password)
+    const user = await prisma.user.create({
+      data: {
+        name: body.name,
+        email: body.email,
+        phone: body.phone,
+        passwordHash,
+        status: "pending",
+      },
+    })
+
+    await sendVerificationEmail(user.id, user.name, user.email)
+
+    return reply.code(201).send({ ok: true })
+  })
+
+  // ── Fase Q: link de verificación de email — sin sesión (quien lo toca
+  // recién se está registrando, todavía no puede loguearse). Idempotente:
+  // si ya estaba verificado, solo muestra la pantalla de nuevo sin volver a
+  // avisar a la comisión. Recién acá (no antes) el registro entra a la cola
+  // de aprobación — ver filtro en el panel de Usuarios. ──
+  app.get("/public/verify-email", async (request, reply) => {
+    const query = z.object({ token: z.string().min(1) }).safeParse(request.query)
+    if (!query.success) {
+      return reply.code(400).type("text/html").send(brandStandalonePage("Link inválido", "Este link no es válido."))
+    }
+
+    const decoded = verifyVerifyEmailToken(query.data.token)
+    if (!decoded) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          brandStandalonePage(
+            "Link vencido",
+            "Este link ya venció. Volvé a /login y registrate de nuevo para recibir uno nuevo.",
+          ),
+        )
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId } })
+    if (!user) {
+      return reply.code(404).type("text/html").send(brandStandalonePage("No encontrado", "No encontramos tu usuario."))
+    }
+
+    if (!user.emailVerifiedAt) {
+      await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } })
+
+      const approvers = await usersWithPermission("users.manage")
+      await notify(
+        approvers.map((a) => a.id),
+        {
+          title: "Nuevo registro esperando aprobación",
+          body: `${user.name} (${user.email}) confirmó su email y espera aprobación.`,
+          link: "/administracion",
+          type: "volunteer_pending",
+          email: {
+            subject: "Nuevo registro esperando aprobación",
+            html: `<p><strong>${user.name}</strong> (${user.email}${
+              user.phone ? `, ${user.phone}` : ""
+            }) confirmó su email desde /login y espera aprobación.</p><p>Revisalo en /administracion → Usuarios.</p>`,
+          },
+        },
+      )
+    }
+
+    return reply
+      .type("text/html")
+      .send(
+        brandStandalonePage(
+          `¡Listo, ${user.name.split(" ")[0]}!`,
+          "Confirmamos tu email. La comisión va a revisar tu registro y te va a avisar por mail apenas esté aprobado.",
+        ),
+      )
   })
 
   // Fase P: link de un solo toque desde el email o desde los botones del

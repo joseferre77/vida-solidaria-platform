@@ -40,6 +40,14 @@ model User {
   phone        String?
   avatarUrl    String?    @map("avatar_url")
   status       UserStatus @default(active)
+  // Fase Q: autorregistro con confirmación de email desde /login (antes
+  // solo existía el alta manual desde /administracion, o el formulario del
+  // sitio público sin contraseña — ver notas de public.routes.ts). Null
+  // hasta que la persona toca el link del mail; recién ahí el pedido
+  // aparece en la cola de aprobación de la comisión. Nullable a propósito
+  // para no romper cuentas ya activas creadas antes de este campo — el
+  // login sigue exigiendo solo status=active, no este campo.
+  emailVerifiedAt DateTime? @map("email_verified_at")
   // Motivo/mensaje que la persona escribió en el formulario público de alta
   // (vidasolidariamdp.com). Null para usuarios creados a mano desde gestión.
   volunteerMessage String? @map("volunteer_message")

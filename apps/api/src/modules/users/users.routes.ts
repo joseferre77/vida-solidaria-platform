@@ -80,6 +80,13 @@ function serializeUser(user: {
   status: string
   volunteerMessage: string | null
   createdAt: Date
+  // Fase Q: null para el alta manual/voluntario clásico (sin verificación
+  // de email); fecha para quien se autorregistró desde /login y confirmó
+  // el link. NO se usa en el login (que solo exige status=active) — solo
+  // decide si un autorregistro entra a la cola de aprobación (ver
+  // hasPassword más abajo y el filtro en Usuarios.tsx).
+  emailVerifiedAt: Date | null
+  passwordHash: string | null
   birthDate: Date | null
   sex: string | null
   address: string | null
@@ -99,6 +106,11 @@ function serializeUser(user: {
     status: user.status,
     volunteerMessage: user.volunteerMessage,
     createdAt: user.createdAt,
+    emailVerifiedAt: user.emailVerifiedAt,
+    // Nunca se manda el hash — solo si existe, para que el panel sepa
+    // distinguir "pendiente clásico" (sin password todavía) de "autorregistro
+    // Fase Q" (ya eligió su contraseña, solo falta verificar+aprobar).
+    hasPassword: Boolean(user.passwordHash),
     birthDate: user.birthDate,
     sex: user.sex,
     address: user.address,
@@ -114,14 +126,17 @@ function serializeUser(user: {
   }
 }
 
-function welcomeApprovedEmailHtml(name: string, roleLabels: string[]) {
+function welcomeApprovedEmailHtml(name: string, roleLabels: string[], keepsOwnPassword: boolean) {
   return `
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
       <h2 style="color:#73038C;">¡Bienvenido/a al equipo, ${name}!</h2>
       <p>La comisión de <strong>Vida Solidaria Mar del Plata</strong> aprobó tu alta como voluntario/a.</p>
       <p>Tu rol: <strong>${roleLabels.join(", ")}</strong>.</p>
-      <p>Ya podés entrar al sistema de gestión con tu email y la contraseña que te compartió quien te dio el alta.
-      La vas a poder cambiar después desde tu perfil.</p>
+      <p>${
+        keepsOwnPassword
+          ? "Ya podés entrar al sistema de gestión con tu email y la contraseña que elegiste al registrarte."
+          : "Ya podés entrar al sistema de gestión con tu email y la contraseña que te compartió quien te dio el alta. La vas a poder cambiar después desde tu perfil."
+      }</p>
       <p>¡Gracias por sumarte!</p>
     </div>
   `
@@ -299,14 +314,19 @@ export async function usersRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: "Alguno de los roles enviados no existe" })
       }
 
-      const generatedPassword = generateSecurePassword()
-      const passwordHash = await hashPassword(generatedPassword)
+      // Fase Q: quien se autorregistró desde /login ya eligió su propia
+      // contraseña al alta — no hay que pisarla con una generada. Solo se
+      // genera (y se manda) una nueva para el flujo clásico (voluntario
+      // desde vidasolidariamdp.com), que nunca tuvo una.
+      const keepsOwnPassword = Boolean(target.passwordHash)
+      const generatedPassword = keepsOwnPassword ? undefined : generateSecurePassword()
+      const passwordHash = keepsOwnPassword ? target.passwordHash! : await hashPassword(generatedPassword!)
 
       const user = await prisma.user.update({
         where: { id },
         data: {
           status: "active",
-          passwordHash,
+          ...(keepsOwnPassword ? {} : { passwordHash }),
           roles: { create: roles.map((r) => ({ roleId: r.id })) },
         },
         include: USER_WITH_ROLES_INCLUDE,
@@ -318,6 +338,7 @@ export async function usersRoutes(app: FastifyInstance) {
         html: welcomeApprovedEmailHtml(
           user.name,
           roles.sort((a, b) => a.rank - b.rank).map((r) => r.label),
+          keepsOwnPassword,
         ),
       })
 
@@ -326,6 +347,7 @@ export async function usersRoutes(app: FastifyInstance) {
         // Igual que en el alta manual: se devuelve una única vez para que
         // quien aprobó se la pueda compartir si el email todavía no llega
         // (ej. Resend sin configurar) — no queda guardada en ningún lado.
+        // undefined cuando la persona ya tenía su propia contraseña.
         generatedPassword,
       })
     },
