@@ -34,10 +34,21 @@ const serwist = new Serwist({
 
 serwist.addEventListeners()
 
+interface PushAction {
+  action: string
+  title: string
+  url: string
+}
+
 interface PushPayload {
   title: string
   body?: string
   link?: string
+  // Fase P: botones tipo "Puedo" / "No puedo" en el aviso semanal — cada
+  // uno con su propia URL (link firmado, no requiere sesión — ver
+  // lib/confirm-token.ts en el backend). Se resuelven en segundo plano acá
+  // abajo, SIN abrir la app, para que confirmar sea un solo toque.
+  actions?: PushAction[]
 }
 
 self.addEventListener("push", (event) => {
@@ -50,21 +61,57 @@ self.addEventListener("push", (event) => {
     payload = { title: "Vida Solidaria", body: event.data.text() }
   }
 
-  event.waitUntil(
-    self.registration.showNotification(payload.title || "Vida Solidaria", {
-      body: payload.body,
-      icon: "/brand/icon-192.png",
-      badge: "/brand/icon-192.png",
-      data: { link: payload.link || "/dashboard" },
-    }),
-  )
+  // `actions` (botones tipo "Puedo" / "No puedo") es un campo válido en
+  // runtime — spec Web Push / Notifications API — pero el lib.dom.d.ts de
+  // TypeScript todavía no lo tipa en `NotificationOptions`, por eso el
+  // `as object`. Se guardan también dentro de `data` (con su URL completa,
+  // no solo el título del botón) para poder resolverlos en background en
+  // `notificationclick` de abajo.
+  const options: NotificationOptions & { actions?: { action: string; title: string }[] } = {
+    body: payload.body,
+    icon: "/brand/icon-192.png",
+    badge: "/brand/icon-192.png",
+    data: { link: payload.link || "/dashboard", actions: payload.actions },
+    actions: payload.actions?.map((a) => ({ action: a.action, title: a.title })),
+  }
+
+  event.waitUntil(self.registration.showNotification(payload.title || "Vida Solidaria", options as object))
 })
 
-// Al tocar la notificación: si ya hay una pestaña/ventana de la app
-// abierta, la enfoca y la navega ahí mismo; si no, abre una nueva. Así
-// nunca se acumulan pestañas de a una por cada notificación tocada.
+// Al tocar la notificación: si vino de un botón de acción ("Puedo" / "No
+// puedo"), resuelve esa acción en segundo plano (un fetch a un link firmado
+// que no necesita sesión abierta) y muestra un aviso corto de confirmación
+// — sin abrir ninguna pestaña, para que sea un solo toque desde la pantalla
+// de bloqueo. Si tocaron el cuerpo de la notificación (sin acción), sigue
+// el comportamiento de siempre: enfocar la pestaña existente o abrir una.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close()
+
+  const actions = (event.notification.data?.actions as PushAction[] | undefined) ?? []
+  const matched = event.action ? actions.find((a) => a.action === event.action) : undefined
+
+  if (matched) {
+    event.waitUntil(
+      (async () => {
+        try {
+          await fetch(matched.url)
+          await self.registration.showNotification("Vida Solidaria", {
+            body: "¡Listo! Quedó registrado.",
+            icon: "/brand/icon-192.png",
+            badge: "/brand/icon-192.png",
+          })
+        } catch {
+          await self.registration.showNotification("Vida Solidaria", {
+            body: "No se pudo registrar tu respuesta — abrí la app para confirmar desde Presentismo.",
+            icon: "/brand/icon-192.png",
+            badge: "/brand/icon-192.png",
+          })
+        }
+      })(),
+    )
+    return
+  }
+
   const link = (event.notification.data?.link as string) || "/dashboard"
   const targetUrl = new URL(link, self.location.origin).href
 

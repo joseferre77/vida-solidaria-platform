@@ -1392,3 +1392,20 @@ model PushSubscription {
   @@index([userId])
   @@map("push_subscriptions")
 }
+
+
+// Fase P: configuración simple clave/valor editable desde /administracion →
+// Configuración (día del aviso semanal de confirmación de asistencia, y a
+// futuro el toggle de registro público). Nota: esta tabla YA EXISTÍA en la
+// base de producción (con una fila "volunteer_registration_enabled") de un
+// intento anterior que nunca llegó a comitearse al repo — la migración de
+// abajo usa CREATE TABLE IF NOT EXISTS para no romper contra eso, ver
+// migration.sql.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("app_settings")
+}

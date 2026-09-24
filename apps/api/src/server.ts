@@ -20,6 +20,7 @@ import { pushRoutes } from "./modules/push/push.routes"
 import { publicRoutes } from "./modules/public/public.routes"
 import { analyticsRoutes } from "./modules/analytics/analytics.routes"
 import { coordinationRoutes } from "./modules/coordination/coordination.routes"
+import { settingsRoutes } from "./modules/settings/settings.routes"
 import { startScheduledTicks } from "./lib/scheduled-ticks"
 import { ensurePendingMigrations } from "./lib/ensure-migrations"
 import { ensurePermissionsSeeded } from "./lib/ensure-permissions"
@@ -125,6 +126,7 @@ async function main() {
   await app.register(publicRoutes, { prefix: "/api" })
   await app.register(analyticsRoutes, { prefix: "/api" })
   await app.register(coordinationRoutes, { prefix: "/api" })
+  await app.register(settingsRoutes, { prefix: "/api" })
 
   // TODO (Módulo 4+): registrar acá finance.routes (donaciones/compras/rendición).
   // logistics/field-ops/cases todavía sin Socket.IO (ver notas en esos módulos).

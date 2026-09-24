@@ -28,6 +28,13 @@ interface PushPayload {
   title: string
   body?: string
   link?: string
+  // Fase P: botones de acción en la notificación misma (ej. "Puedo" /
+  // "No puedo" en el aviso semanal de asistencia) — cada uno con su propia
+  // URL, que el service worker llama en segundo plano al tocarlo, sin
+  // necesidad de abrir la app (ver apps/web/app/sw.ts). `action` es el id
+  // que el navegador devuelve en `event.action`; máximo 2 en Chrome/Android
+  // (más se ignoran silenciosamente), por eso este feature usa exactamente 2.
+  actions?: { action: string; title: string; url: string }[]
 }
 
 /**
@@ -49,6 +56,7 @@ export async function sendPushToUser(userId: string, payload: PushPayload) {
     title: payload.title,
     body: payload.body ?? "",
     link: payload.link ?? "/",
+    actions: payload.actions,
   })
 
   await Promise.all(

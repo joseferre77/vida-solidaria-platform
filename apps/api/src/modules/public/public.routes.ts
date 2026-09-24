@@ -18,6 +18,8 @@ import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { sendEmail } from "../../lib/email"
 import { notify, usersWithPermission } from "../../lib/notify"
+import { verifyWeeklyConfirmToken } from "../../lib/confirm-token"
+import { brandEmailWrapper } from "../../lib/brand-email"
 
 const volunteerSignupSchema = z.object({
   name: z.string().trim().min(2, "Ingresá tu nombre completo").max(120),
@@ -61,6 +63,28 @@ function welcomeEmailHtml(name: string) {
       <p>¡Gracias por querer ser parte!</p>
     </div>
   `
+}
+
+
+/** Página HTML mínima, sin la SPA (quien toca el link puede no tener
+ * sesión abierta) pero con la identidad de marca — mismo criterio que
+ * `brandEmailWrapper` en lib/brand-email.ts, versión ultra-simple para una
+ * sola pantalla de confirmación. */
+function brandStandalonePage(title: string, message: string): string {
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${title} — Vida Solidaria</title></head>
+<body style="margin:0; background:#F7F4F8; font-family: 'Work Sans', system-ui, sans-serif; color:#2A1030;">
+  <div style="max-width:420px; margin:48px auto; padding:0 20px; text-align:center;">
+    <div style="background:#73038C; border-radius:12px 12px 0 0; padding:20px;">
+      <img src="https://gestion.vidasolidariamdp.com/brand/logo.png" alt="Vida Solidaria" height="36" style="height:36px;" />
+    </div>
+    <div style="background:#ffffff; border-radius:0 0 12px 12px; padding:32px 24px; border:1px solid #ece6ee; border-top:none;">
+      <h1 style="font-size:20px; margin:0 0 12px;">${title}</h1>
+      <p style="font-size:15px; line-height:1.5; margin:0;">${message}</p>
+    </div>
+  </div>
+</body></html>`
 }
 
 export async function publicRoutes(app: FastifyInstance) {
@@ -116,5 +140,64 @@ export async function publicRoutes(app: FastifyInstance) {
     )
 
     return reply.code(201).send({ ok: true })
+  })
+
+  // Fase P: link de un solo toque desde el email o desde los botones del
+  // push ("Puedo" / "No puedo") — a propósito SIN requerir sesión (ver
+  // lib/confirm-token.ts). Responde una página HTML standalone (no la SPA)
+  // porque quien toca el link puede no tener el navegador logueado.
+  app.get("/public/weekly-availability/confirm", async (request, reply) => {
+    const query = z
+      .object({ token: z.string().min(1), attend: z.enum(["yes", "no"]) })
+      .safeParse(request.query)
+
+    if (!query.success) {
+      return reply.code(400).type("text/html").send(brandStandalonePage("Link inválido", "Este link no es válido."))
+    }
+
+    const decoded = verifyWeeklyConfirmToken(query.data.token)
+    if (!decoded) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          brandStandalonePage(
+            "Link vencido",
+            "Este link ya venció. Entrá a la app y confirmá tu asistencia desde Presentismo.",
+          ),
+        )
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId }, select: { id: true, name: true } })
+    if (!user) {
+      return reply.code(404).type("text/html").send(brandStandalonePage("No encontrado", "No encontramos tu usuario."))
+    }
+
+    const willAttend = query.data.attend === "yes"
+    const weekStartDate = new Date(`${decoded.weekStartDate}T00:00:00.000Z`)
+
+    await prisma.weeklyAvailability.upsert({
+      where: { userId_weekStartDate: { userId: user.id, weekStartDate } },
+      create: { userId: user.id, weekStartDate, willAttend, reason: null },
+      update: { willAttend },
+    })
+
+    const sundayLabel = new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "long", timeZone: "UTC" }).format(
+      weekStartDate,
+    )
+
+    return reply
+      .type("text/html")
+      .send(
+        willAttend
+          ? brandStandalonePage(
+              `¡Gracias, ${user.name.split(" ")[0]}!`,
+              `Quedaste anotado/a para el encuentro del domingo ${sundayLabel}. ¡Te esperamos! 💜`,
+            )
+          : brandStandalonePage(
+              `Gracias por avisar, ${user.name.split(" ")[0]}`,
+              `Anotamos que no podés venir el domingo ${sundayLabel}. ¡Nos vemos la próxima!`,
+            ),
+      )
   })
 }

@@ -7,8 +7,9 @@ import { Etiquetas } from "./tabs/Etiquetas"
 import { CamposPersonalizados } from "./tabs/CamposPersonalizados"
 import { Encuestas } from "./tabs/Encuestas"
 import { Usuarios } from "./tabs/Usuarios"
+import { Configuracion } from "./tabs/Configuracion"
 
-type TabKey = "usuarios" | "etiquetas" | "campos" | "encuestas"
+type TabKey = "usuarios" | "etiquetas" | "campos" | "encuestas" | "configuracion"
 
 /**
  * Fase G — pantallas de administración. A diferencia de la página de un
@@ -53,6 +54,7 @@ export default function AdministracionPage() {
     { key: "etiquetas", label: "Etiquetas", visible: canAdmin },
     { key: "campos", label: "Campos Personalizados", visible: canAdmin },
     { key: "encuestas", label: "Encuestas", visible: canSurveys },
+    { key: "configuracion", label: "Configuración", visible: canUsers },
   ].filter((t) => t.visible) as { key: TabKey; label: string; visible: boolean }[]
 
   const currentTab = TABS.some((t) => t.key === activeTab) ? activeTab : TABS[0]?.key
@@ -84,6 +86,7 @@ export default function AdministracionPage() {
       {currentTab === "etiquetas" && <Etiquetas />}
       {currentTab === "campos" && <CamposPersonalizados />}
       {currentTab === "encuestas" && <Encuestas currentUserId={user!.id} />}
+      {currentTab === "configuracion" && <Configuracion />}
     </main>
   )
 }

@@ -44,6 +44,9 @@ interface NotifyInput {
   link?: string
   type?: string
   email?: { subject: string; html: string }
+  // Fase P: botones de acción del push (ver lib/push.ts) — opcional, la
+  // gran mayoría de notificaciones no los necesita.
+  pushActions?: { action: string; title: string; url: string }[]
 }
 
 /** Crea la notificación "en el sistema" para cada usuario y, si se pasa
@@ -64,7 +67,9 @@ export async function notify(userIds: string[], data: NotifyInput) {
   })
 
   await Promise.all(
-    uniqueIds.map((userId) => sendPushToUser(userId, { title: data.title, body: data.body, link: data.link })),
+    uniqueIds.map((userId) =>
+      sendPushToUser(userId, { title: data.title, body: data.body, link: data.link, actions: data.pushActions }),
+    ),
   )
 
   if (data.email) {
