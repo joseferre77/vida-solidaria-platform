@@ -111,6 +111,12 @@ export const approveUser = (id: string, roleSlugs: string[]) =>
 export const rejectUser = (id: string) =>
   apiFetch(`/api/users/${id}/reject`, { method: "PATCH", body: "{}" }) as Promise<UserItem>
 
+export const regeneratePassword = (id: string) =>
+  apiFetch(`/api/users/${id}/regenerate-password`, { method: "PATCH", body: "{}" }) as Promise<{
+    email: string
+    generatedPassword: string
+  }>
+
 // Baja definitiva — a diferencia de updateUser(id, {status:"suspended"}),
 // esto borra la fila de verdad. Puede fallar con un 409 si la persona
 // tiene gastos/notas de proyecto a su nombre (ver nota en el backend).

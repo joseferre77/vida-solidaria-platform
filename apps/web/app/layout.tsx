@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next"
 import "../styles/globals.css"
 import { AppShell } from "../components/AppShell"
+import { RegisterServiceWorker } from "../components/RegisterServiceWorker"
 
 export const metadata: Metadata = {
   title: "Vida Solidaria — Plataforma de Gestión",
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="font-body min-h-screen">
+        <RegisterServiceWorker />
         <AppShell>{children}</AppShell>
       </body>
     </html>

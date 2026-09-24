@@ -16,6 +16,7 @@ import { fieldOpsRoutes } from "./modules/field-ops/field-ops.routes"
 import { logisticsRoutes } from "./modules/logistics/logistics.routes"
 import { casesRoutes } from "./modules/cases/cases.routes"
 import { notificationsRoutes } from "./modules/notifications/notifications.routes"
+import { pushRoutes } from "./modules/push/push.routes"
 import { publicRoutes } from "./modules/public/public.routes"
 import { analyticsRoutes } from "./modules/analytics/analytics.routes"
 import { coordinationRoutes } from "./modules/coordination/coordination.routes"
@@ -120,6 +121,7 @@ async function main() {
   await app.register(logisticsRoutes, { prefix: "/api" })
   await app.register(casesRoutes, { prefix: "/api" })
   await app.register(notificationsRoutes, { prefix: "/api" })
+  await app.register(pushRoutes, { prefix: "/api" })
   await app.register(publicRoutes, { prefix: "/api" })
   await app.register(analyticsRoutes, { prefix: "/api" })
   await app.register(coordinationRoutes, { prefix: "/api" })

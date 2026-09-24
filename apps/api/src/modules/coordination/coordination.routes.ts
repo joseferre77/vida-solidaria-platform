@@ -16,6 +16,7 @@ import type { FastifyInstance } from "fastify"
 import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
+import { notify, usersWithPermission } from "../../lib/notify"
 
 const sendMessageSchema = z.object({
   body: z.string().trim().min(1, "El mensaje no puede estar vacío").max(4000),
@@ -82,6 +83,22 @@ export async function coordinationRoutes(app: FastifyInstance) {
         data: { body: body.body, createdById: request.user!.sub },
         include: MESSAGE_INCLUDE,
       })
+
+      const notifyIds = (await usersWithPermission("coordination.chat"))
+        .map((u) => u.id)
+        .filter((id) => id !== request.user!.sub)
+      if (notifyIds.length > 0) {
+        const preview = message.body.length > 120 ? `${message.body.slice(0, 120)}…` : message.body
+        // Sin canal de email acá a propósito — es un chat, demasiado
+        // frecuente para mandar un mail por cada mensaje (ver notify.ts).
+        await notify(notifyIds, {
+          title: `${message.createdBy.name} — chat de coordinadores`,
+          body: preview,
+          link: "/coordinacion",
+          type: "coordination_message",
+        })
+      }
+
       return reply.code(201).send(serializeMessage(message))
     },
   )

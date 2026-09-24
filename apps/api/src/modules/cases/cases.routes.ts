@@ -39,7 +39,7 @@ import type { FastifyInstance } from "fastify"
 import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
-import { notify } from "../../lib/notify"
+import { notify, usersWithPermission } from "../../lib/notify"
 // Import cruzado a Proyectos para la auto-conversión de casos (bloque
 // post-Fase-K "Casos II") — mismo patrón ya usado por analytics.routes.ts
 // (que importa `listProjects` de este mismo service), no es la primera vez
@@ -583,6 +583,16 @@ export async function casesRoutes(app: FastifyInstance) {
       return tx.case.findUniqueOrThrow({ where: { id: caseRecord.id }, include: CASE_DETAIL_INCLUDE })
     })
     await logActivity(userId, "case", created.id, "created", { caseNumber, fullName: body.fullName })
+
+    const notifyIds = (await usersWithPermission("cases.read")).map((u) => u.id).filter((id) => id !== userId)
+    if (notifyIds.length > 0) {
+      await notify(notifyIds, {
+        title: `Caso nuevo: ${created.caseNumber}`,
+        link: `/casos/${created.id}`,
+        type: "case_created",
+      })
+    }
+
     return reply.code(201).send(await serializeCaseDetail(created))
   })
 

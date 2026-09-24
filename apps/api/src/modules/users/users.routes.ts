@@ -222,6 +222,30 @@ export async function usersRoutes(app: FastifyInstance) {
     return serializeUser(user)
   })
 
+  // ── Regenerar contraseña (hueco detectado por Josecito 24/09/2026): la
+  // única forma de ver una clave en texto plano era en el momento del ALTA
+  // o de la APROBACIÓN — si alguien ya activo la perdía, no había forma de
+  // ayudarlo sin borrar y recrear el usuario entero (perdiendo su ficha e
+  // historial). "Ver la clave actual" no es posible ni deseable — se
+  // guarda hasheada — así que esto es lo que corresponde en su lugar:
+  // mismo patrón que el alta y la aprobación, se devuelve UNA sola vez. ──
+  app.patch(
+    "/users/:id/regenerate-password",
+    { preHandler: [requireAuth, requirePermission("users.manage")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+
+      const target = await prisma.user.findUnique({ where: { id } })
+      if (!target) return reply.code(404).send({ error: "Usuario no encontrado" })
+
+      const generatedPassword = generateSecurePassword()
+      const passwordHash = await hashPassword(generatedPassword)
+      await prisma.user.update({ where: { id }, data: { passwordHash } })
+
+      return reply.send({ email: target.email, generatedPassword })
+    },
+  )
+
   // ── Asignación de roles (reemplaza el set completo) ──
   app.patch(
     "/users/:id/roles",

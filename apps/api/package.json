@@ -35,7 +35,8 @@
     "ioredis": "^5.4.1",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "prisma": "^5.22.0",
@@ -46,6 +47,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/passport": "^1.0.17",
     "@types/passport-google-oauth20": "^2.0.16",
+    "@types/web-push": "^3.6.4",
     "vitest": "^2.1.4",
     "supertest": "^7.0.0"
   }

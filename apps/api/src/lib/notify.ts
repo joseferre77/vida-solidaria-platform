@@ -7,6 +7,7 @@
  */
 import { prisma } from "./prisma"
 import { sendEmail } from "./email"
+import { sendPushToUser } from "./push"
 
 /**
  * Usuarios activos cuyo rol tiene el permiso dado (ej. "logistics.write").
@@ -61,6 +62,10 @@ export async function notify(userIds: string[], data: NotifyInput) {
       type: data.type ?? null,
     })),
   })
+
+  await Promise.all(
+    uniqueIds.map((userId) => sendPushToUser(userId, { title: data.title, body: data.body, link: data.link })),
+  )
 
   if (data.email) {
     const users = await prisma.user.findMany({ where: { id: { in: uniqueIds } }, select: { email: true } })

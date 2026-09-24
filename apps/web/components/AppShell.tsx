@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { fetchMe, hasPermission, logout, type SessionUser } from "../lib/auth"
 import { fetchMarDelPlataWeather, type WeatherNow } from "../lib/weather"
+import { NotificationBell } from "./NotificationBell"
 
 /**
  * Barra superior + navegación persistentes para toda la app autenticada
@@ -265,6 +266,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {weather.emoji} {weather.tempC}°C
             </span>
           )}
+          {user && <NotificationBell />}
           {user && (
             <div className="relative">
               <button

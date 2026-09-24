@@ -45,6 +45,15 @@ const envSchema = z.object({
   // Cuando Josecito cree la cuenta en Resend, esto se completa en el .env.
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default("Vida Solidaria <notificaciones@vidasolidariamdp.com>"),
+
+  // Bloque de notificaciones push (celular, real — pantalla de bloqueo).
+  // Mismo criterio que RESEND_API_KEY: opcional a propósito, sin romper
+  // nada mientras no estén cargadas (ver `lib/push.ts`). Se generan una
+  // sola vez con `npx web-push generate-vapid-keys` y quedan fijas para
+  // siempre (cambiarlas invalida TODAS las suscripciones ya guardadas).
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default("mailto:hola@vidasolidariamdp.com"),
 })
 
 const parsed = envSchema.safeParse(process.env)

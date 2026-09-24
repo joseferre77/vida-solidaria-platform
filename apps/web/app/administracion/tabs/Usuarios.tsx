@@ -9,6 +9,7 @@ import {
   deleteUser,
   listRoles,
   listUsers,
+  regeneratePassword,
   rejectUser,
   updateUser,
   updateUserRoles,
@@ -46,6 +47,7 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
   const [editingProfileFor, setEditingProfileFor] = useState<UserItem | null>(null)
   const [viewingProfileFor, setViewingProfileFor] = useState<UserItem | null>(null)
   const [deletingFor, setDeletingFor] = useState<UserItem | null>(null)
+  const [regeneratingFor, setRegeneratingFor] = useState<UserItem | null>(null)
   const [lastGeneratedPassword, setLastGeneratedPassword] = useState<{ email: string; password: string } | null>(
     null,
   )
@@ -270,6 +272,10 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
                   <button onClick={() => setEditingRolesFor(u)} className="text-xs text-yellow hover:underline">
                     Editar roles
                   </button>
+                  <span className="mx-1.5 text-cream/20">·</span>
+                  <button onClick={() => setRegeneratingFor(u)} className="text-xs text-yellow hover:underline">
+                    Regenerar contraseña
+                  </button>
                   {u.id !== currentUserId && (
                     <>
                       <span className="mx-1.5 text-cream/20">·</span>
@@ -359,6 +365,84 @@ export function Usuarios({ currentUserId }: { currentUserId: string }) {
           }}
         />
       )}
+
+      {regeneratingFor && (
+        <RegeneratePasswordModal user={regeneratingFor} onClose={() => setRegeneratingFor(null)} />
+      )}
+    </div>
+  )
+}
+
+function RegeneratePasswordModal({ user, onClose }: { user: UserItem; onClose: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<{ email: string; generatedPassword: string } | null>(null)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-white/15 bg-purple-deep p-6">
+        {!result ? (
+          <>
+            <h2 className="mb-1 font-display text-lg font-bold text-cream">Regenerar contraseña</h2>
+            <p className="mb-4 text-xs text-cream/60">
+              Se va a generar una contraseña nueva para <strong className="text-cream">{user.name}</strong> (
+              {user.email}) y la actual deja de funcionar. Vas a poder copiarla una sola vez, para
+              compartírsela.
+            </p>
+            {error && <p className="mb-3 text-sm text-orange">{error}</p>}
+            <div className="flex justify-end gap-3">
+              <button onClick={onClose} className="rounded-xl border border-white/20 px-4 py-2 text-sm hover:bg-white/5">
+                Cancelar
+              </button>
+              <button
+                disabled={loading}
+                onClick={async () => {
+                  setLoading(true)
+                  setError(null)
+                  try {
+                    const res = await regeneratePassword(user.id)
+                    setResult(res)
+                  } catch (err: any) {
+                    setError(err.message ?? "No se pudo regenerar la contraseña")
+                  } finally {
+                    setLoading(false)
+                  }
+                }}
+                className="rounded-xl bg-yellow px-4 py-2 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-40"
+              >
+                {loading ? "Generando..." : "Regenerar"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 className="mb-1 font-display text-lg font-bold text-yellow">Contraseña regenerada</h2>
+            <p className="mb-3 text-xs text-cream/60">Para {result.email}:</p>
+            <div className="mb-4 flex items-center gap-2">
+              <code className="rounded-lg bg-black/30 px-3 py-1.5 font-mono text-yellow">
+                {result.generatedPassword}
+              </code>
+              <button
+                onClick={() => navigator.clipboard?.writeText(result.generatedPassword)}
+                className="rounded-lg border border-white/20 px-2 py-1 text-xs hover:bg-white/5"
+              >
+                Copiar
+              </button>
+            </div>
+            <p className="mb-4 text-xs text-cream/60">
+              Compartila con la persona ahora — no se vuelve a mostrar.
+            </p>
+            <div className="flex justify-end">
+              <button
+                onClick={onClose}
+                className="rounded-xl bg-yellow px-4 py-2 text-sm font-semibold text-purple-deep hover:opacity-90"
+              >
+                Listo
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

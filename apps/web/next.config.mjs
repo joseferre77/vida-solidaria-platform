@@ -1,8 +1,18 @@
 /**
- * Estado: config base. El wrapper PWA (@serwist/next) y la config de
- * Capacitor para el build APK se agregan al llegar a esa fase del roadmap
- * (no antes del Módulo 1) — ver ARCHITECTURE.md §1 y §7.
+ * Fase O (24/09/2026): el wrapper PWA (@serwist/next) se conecta acá —
+ * hasta ahora estaba solo instalado, nunca wireado ("se agrega al llegar
+ * a esa fase del roadmap", nunca se había llegado). Necesario para que
+ * exista un service worker real y, con eso, notificaciones push
+ * verdaderas al celular (ver app/sw.ts). La config de Capacitor para el
+ * build APK sigue pendiente para más adelante — ver ARCHITECTURE.md §7.
  */
+import withSerwistInit from "@serwist/next"
+
+const withSerwist = withSerwistInit({
+  swSrc: "app/sw.ts",
+  swDest: "public/sw.js",
+})
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -25,4 +35,4 @@ const nextConfig = {
   },
 }
 
-export default nextConfig
+export default withSerwist(nextConfig)

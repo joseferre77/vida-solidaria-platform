@@ -18,3 +18,9 @@ apps/api/uploads/
 apps/api/prisma/*.db
 android/
 ios/
+
+# Fase O: el service worker es un build output (generado por Serwist a
+# partir de app/sw.ts en cada `next build`), no código fuente — no se
+# versiona, igual que .next/ o dist/.
+apps/web/public/sw.js
+*.tsbuildinfo
