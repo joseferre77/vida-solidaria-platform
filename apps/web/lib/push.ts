@@ -46,6 +46,18 @@ export async function enablePushNotifications() {
     throw new Error("Este navegador no soporta notificaciones push.")
   }
 
+  // Si ya está en "denied", el navegador ni siquiera muestra el cartel de
+  // permiso al llamar a requestPermission() — devuelve "denied" derecho,
+  // en silencio. Sin este chequeo previo, el usuario ve el mismo cartel
+  // genérico de "no diste el permiso" para siempre y no hay forma de
+  // volver a pedirlo desde acá: hay que ir a la config del sitio en el
+  // navegador y cambiarlo a mano (ver mensaje de abajo).
+  if (Notification.permission === "denied") {
+    throw new Error(
+      "Las notificaciones están bloqueadas para este sitio en tu navegador — no podemos volver a pedir el permiso desde acá. Hacé clic en el ícono de candado (o \"i\") al lado de la dirección del sitio, buscá \"Notificaciones\" y ponelo en \"Permitir\", después recargá la página.",
+    )
+  }
+
   const permission = await Notification.requestPermission()
   if (permission !== "granted") {
     throw new Error("No diste el permiso de notificaciones — sin eso no podemos avisarte al celular.")
