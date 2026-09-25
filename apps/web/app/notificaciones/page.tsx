@@ -6,6 +6,7 @@ import { fetchMe, type SessionUser } from "../../lib/auth"
 import {
   clearReadNotifications,
   listNotificationsHistory,
+  markAllNotificationsRead,
   markNotificationRead,
   type NotificationItem,
 } from "../../lib/notifications"
@@ -19,6 +20,14 @@ import { timeAgo } from "../../lib/format"
  * acá queda el historial entero (paginado) con un botón para borrar
  * definitivamente las que ya se leyeron. Autogestión de lo propio, sin
  * permiso especial — mismo criterio que /presentismo.
+ *
+ * Fase U (25/09/2026): "Limpiar" al toque marcaba como leídas solo las que
+ * uno tocaba una por una — si alguien tenía 8 notificaciones sin leer y
+ * apretaba "Limpiar leídas" sin haber tocado ninguna, no borraba nada (no
+ * había leídas) y parecía roto ("las limpié pero siguen apareciendo",
+ * reportado por Josecito). Ahora el botón primero marca TODO como leído y
+ * recién después borra — un solo click vacía lo que se está viendo, sin
+ * tener que entrar notificación por notificación antes.
  */
 export default function NotificacionesPage() {
   const router = useRouter()
@@ -71,19 +80,23 @@ export default function NotificacionesPage() {
     if (n.link) router.push(n.link)
   }
 
-  function handleClear() {
+  async function handleClear() {
     setClearing(true)
-    clearReadNotifications()
-      .then(() => {
-        // Se borraron definitivamente en el servidor — se sacan de la
-        // lista local sin esperar un refetch.
-        setItems((prev) => prev.filter((i) => !i.readAt))
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setClearing(false))
+    setError(null)
+    try {
+      // Fase U: primero marca todo como leído (incluye lo que todavía no
+      // se había tocado) y recién ahí borra — así "Limpiar" siempre vacía
+      // lo que se está viendo, en vez de depender de haber leído cada
+      // notificación una por una antes.
+      await markAllNotificationsRead()
+      await clearReadNotifications()
+      setItems([])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo limpiar")
+    } finally {
+      setClearing(false)
+    }
   }
-
-  const hasReadItems = items.some((i) => i.readAt)
 
   if (user === undefined) {
     return <p className="p-8 text-cream/60">Cargando...</p>
@@ -100,10 +113,10 @@ export default function NotificacionesPage() {
         </div>
         <button
           onClick={handleClear}
-          disabled={clearing || !hasReadItems}
+          disabled={clearing || items.length === 0}
           className="shrink-0 rounded-xl border border-white/20 px-3 py-1.5 text-xs font-medium text-cream/80 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {clearing ? "Borrando..." : "Limpiar leídas"}
+          {clearing ? "Limpiando..." : "Limpiar todo"}
         </button>
       </header>
 
