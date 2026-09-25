@@ -340,6 +340,30 @@ function StockItemCard({
           {item.totalValue !== null && <span>Valor total: {formatMoney(item.totalValue)}</span>}
         </div>
       )}
+
+      {/* Fase R: dónde está cada cosa — no alcanza con saber cuánto hay en
+          total, hace falta saber en qué casa está (pedido de Josecito:
+          "en la casa de Patricio hay 8 kilos de arroz"). Solo se muestra
+          si hay más de una fila (o una sola que no es el depósito central)
+          — si todo está en el depósito central, la línea de "Cantidad" de
+          arriba ya dice todo lo que hace falta. */}
+      {!item.isReusable && item.byHolder.length > 0 && !(item.byHolder.length === 1 && item.byHolder[0].holderUserId === null) && (
+        <div className="mt-1.5 rounded-lg border border-white/10 bg-black/10 px-2.5 py-1.5">
+          <p className="mb-1 text-[10px] uppercase tracking-wide text-cream/40">Dónde está</p>
+          <ul className="space-y-0.5 text-xs text-cream/75">
+            {item.byHolder.map((h) => (
+              <li key={h.holderUserId ?? "central"} className="flex items-center justify-between gap-2">
+                <span className={h.holderUserId === null ? "text-cream/60" : ""}>
+                  {h.holderUserId === null ? "📦 Depósito central" : `🏠 ${h.holderLabel}`}
+                </span>
+                <span className="font-medium text-cream">
+                  {h.quantity} {item.unit}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {(item.reorderPoint !== null || item.restockTarget !== null) && (
         <p className="mt-0.5 text-[11px] text-cream/40">
           {item.reorderPoint !== null && <>Punto de pedido: {item.reorderPoint} {item.unit} </>}

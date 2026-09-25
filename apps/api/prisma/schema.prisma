@@ -1066,14 +1066,28 @@ model StockMovement {
   type              MovementType
   quantity          Decimal
   reason            String?
-  relatedEntityType String?      @map("related_entity_type") // "kitchen_batch" | "field_delivery" | ...
+  relatedEntityType String?      @map("related_entity_type") // "kitchen_batch" | "field_delivery" | "stock_transfer" | ...
   relatedEntityId   String?      @map("related_entity_id")
-  createdBy         String       @map("created_by")
-  createdAt         DateTime     @default(now()) @map("created_at")
+  // Fase R (25/09/2026): depósitos múltiples — donaciones que quedan en la
+  // casa de un coordinador (Patricio con arroz/lentejas/té) en vez de ir
+  // directo al depósito central. NULL = depósito central (comportamiento
+  // de siempre, todo el historial anterior a esta fase queda así sin
+  // migrar nada). No es un campo mutable ni una tabla de "depósitos" nueva
+  // — sigue la misma convención del ledger: la cantidad que tiene cada
+  // persona se DERIVA sumando sus movimientos (ver quantityByHolder en
+  // logistics.routes.ts), nunca se guarda aparte. Un traspaso (de la casa
+  // de Patricio al depósito central, o a la casa de otro coordinador) es
+  // simplemente un egreso en el holder de origen + un ingreso en el de
+  // destino, linkeados por relatedEntityType "stock_transfer" +
+  // relatedEntityId compartido.
+  holderUserId String? @map("holder_user_id")
+  createdBy    String  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
 
   stockItem StockItem @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
 
   @@index([stockItemId])
+  @@index([holderUserId])
   @@map("stock_movements")
 }
 
@@ -1130,6 +1144,11 @@ model KitchenBatchAssignee {
   batchId   String  @map("batch_id")
   userId    String  @map("user_id")
   taskLabel String? @map("task_label")
+  // Fase R: mail "te sumamos a cocinar este finde" con botón de confirmar
+  // (link firmado, ver lib/kitchen-confirm-token.ts) — null hasta que la
+  // persona lo toca. No bloquea nada si no confirma (no hay recordatorio
+  // automático todavía), es solo una señal para quien coordina cocina.
+  confirmedAt DateTime? @map("confirmed_at")
 
   batch KitchenBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 

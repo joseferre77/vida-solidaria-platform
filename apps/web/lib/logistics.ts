@@ -41,6 +41,16 @@ export interface StockMovementItem {
   createdAt: string
 }
 
+// Fase R: dónde está cada cosa — depósito central (holderUserId null) +
+// casas de coordinadores, cada uno con su cantidad neta (ver
+// quantityByHolder/serializeByHolder en logistics.routes.ts).
+export interface StockHolderRow {
+  holderUserId: string | null
+  holder: BasicUser | null
+  holderLabel: string
+  quantity: number | string
+}
+
 export interface StockItemItem {
   id: string
   code: string
@@ -57,6 +67,7 @@ export interface StockItemItem {
   totalValue: number | null
   belowReorderPoint: boolean
   activeCustody: StockCustodyItem | null
+  byHolder: StockHolderRow[]
 }
 
 export interface StockSummary {
@@ -286,3 +297,44 @@ export const removeKitchenBatchEquipment = (id: string, custodyId: string) =>
 // Fase L — "tablero del voluntario": mis lotes de cocina (soy responsable o
 // estoy asignado), para el widget del dashboard.
 export const listMyKitchenBatches = () => apiFetch("/api/kitchen-batches/mine") as Promise<KitchenBatchItem[]>
+
+
+// ── Fase R: "Mi depósito" — donaciones que un coordinador tiene en su
+// propia casa en vez de en el depósito central (ver holderUserId en
+// StockMovement). Cualquier usuario activo puede usar esto, no requiere
+// logistics.write. ──
+export interface MyStockRow {
+  stockItem: { id: string; code: string; name: string; unit: StockUnit; icon: string | null }
+  quantity: number | string
+}
+
+export interface StockCatalogEntry {
+  id: string
+  name: string
+  unit: StockUnit
+  icon: string | null
+}
+
+export const getMyStock = () => apiFetch("/api/my-stock") as Promise<MyStockRow[]>
+
+// Catálogo mínimo (sin permiso logistics.read) para elegir un insumo que ya
+// existe al cargar una donación, en vez de crear uno duplicado sin saberlo.
+export const getMyStockCatalog = () => apiFetch("/api/my-stock/catalog") as Promise<StockCatalogEntry[]>
+
+export const createMyStockIngreso = (data: {
+  stockItemId?: string
+  newItemName?: string
+  unit?: StockUnit
+  quantity: number
+  reason?: string
+}) => apiFetch("/api/my-stock/ingreso", { method: "POST", body: JSON.stringify(data) }) as Promise<{
+  ok: true
+  stockItem: { id: string; name: string; unit: StockUnit }
+}>
+
+export const transferMyStock = (
+  stockItemId: string,
+  data: { toHolderUserId: string | null; quantity: number; notes?: string; fromHolderUserId?: string },
+) => apiFetch(`/api/my-stock/${stockItemId}/traspaso`, { method: "POST", body: JSON.stringify(data) }) as Promise<
+  StockItemItem
+>

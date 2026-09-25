@@ -67,10 +67,18 @@ self.addEventListener("push", (event) => {
   // `as object`. Se guardan también dentro de `data` (con su URL completa,
   // no solo el título del botón) para poder resolverlos en background en
   // `notificationclick` de abajo.
+  // Fase R (25/09/2026): `badge` usaba el mismo ícono a color que `icon`
+  // (icon-192.png), que es ~80% opaco — Android ignora el color y pinta
+  // SOLO el canal alfa como silueta en la barra de estado, así que un PNG
+  // mayormente opaco se veía como un bloque lavado/sin forma (bajo
+  // contraste que reportó Josecito). badge-96.png es una silueta recortada
+  // del isotipo con el alfa binarizado (ver el script que lo generó, en
+  // public/brand/) — mismo criterio, ahora con una forma real en vez de un
+  // cuadrado casi lleno.
   const options: NotificationOptions & { actions?: { action: string; title: string }[] } = {
     body: payload.body,
     icon: "/brand/icon-192.png",
-    badge: "/brand/icon-192.png",
+    badge: "/brand/badge-96.png",
     data: { link: payload.link || "/dashboard", actions: payload.actions },
     actions: payload.actions?.map((a) => ({ action: a.action, title: a.title })),
   }
@@ -98,13 +106,13 @@ self.addEventListener("notificationclick", (event) => {
           await self.registration.showNotification("Vida Solidaria", {
             body: "¡Listo! Quedó registrado.",
             icon: "/brand/icon-192.png",
-            badge: "/brand/icon-192.png",
+            badge: "/brand/badge-96.png",
           })
         } catch {
           await self.registration.showNotification("Vida Solidaria", {
             body: "No se pudo registrar tu respuesta — abrí la app para confirmar desde Presentismo.",
             icon: "/brand/icon-192.png",
-            badge: "/brand/icon-192.png",
+            badge: "/brand/badge-96.png",
           })
         }
       })(),

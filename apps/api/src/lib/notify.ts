@@ -38,6 +38,24 @@ export async function usersWithPermission(slug: string) {
   })
 }
 
+/**
+ * Fase R: usuarios activos que tienen alguno de los roles indicados (por
+ * slug) — a diferencia de `usersWithPermission`, esto es para cuando la
+ * lista de destinatarios se define por ROL puntual (ej. "Dirección
+ * General" para el aviso de donación nueva) y no por permiso, porque el
+ * permiso más cercano (`logistics.read`) también lo tienen otros roles que
+ * acá no deberían recibir el aviso (ver notas de Josecito, 25/09/2026).
+ */
+export async function usersWithRoles(slugs: string[]) {
+  return prisma.user.findMany({
+    where: {
+      status: "active",
+      roles: { some: { role: { slug: { in: slugs } } } },
+    },
+    select: { id: true, name: true, email: true },
+  })
+}
+
 interface NotifyInput {
   title: string
   body?: string

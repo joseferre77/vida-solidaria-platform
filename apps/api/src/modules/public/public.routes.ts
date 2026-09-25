@@ -23,6 +23,7 @@ import { env } from "../../config/env"
 import { sendEmail } from "../../lib/email"
 import { notify, usersWithPermission } from "../../lib/notify"
 import { verifyWeeklyConfirmToken } from "../../lib/confirm-token"
+import { verifyKitchenConfirmToken } from "../../lib/kitchen-confirm-token"
 import { signVerifyEmailToken, verifyVerifyEmailToken } from "../../lib/email-verify-token"
 import { brandEmailWrapper, brandButton } from "../../lib/brand-email"
 import { hashPassword } from "../auth/auth.service"
@@ -346,6 +347,57 @@ export async function publicRoutes(app: FastifyInstance) {
               `Gracias por avisar, ${user.name.split(" ")[0]}`,
               `Anotamos que no podés venir el domingo ${sundayLabel}. ¡Nos vemos la próxima!`,
             ),
+      )
+  })
+
+  // Fase R: link de un solo toque del mail "te sumamos a cocinar" — sin
+  // sesión, mismo criterio que el resto de estos links. Idempotente: si ya
+  // estaba confirmado, muestra el mismo agradecimiento sin pisar la fecha
+  // original de confirmedAt.
+  app.get("/public/kitchen-batches/confirm", async (request, reply) => {
+    const query = z.object({ token: z.string().min(1) }).safeParse(request.query)
+    if (!query.success) {
+      return reply.code(400).type("text/html").send(brandStandalonePage("Link inválido", "Este link no es válido."))
+    }
+
+    const decoded = verifyKitchenConfirmToken(query.data.token)
+    if (!decoded) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          brandStandalonePage(
+            "Link vencido",
+            "Este link ya venció. Entrá a la app y confirmá desde tu lote de cocina en Equipos.",
+          ),
+        )
+    }
+
+    const assignee = await prisma.kitchenBatchAssignee.findUnique({
+      where: { batchId_userId: { batchId: decoded.batchId, userId: decoded.userId } },
+    })
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId }, select: { id: true, name: true } })
+    if (!assignee || !user) {
+      return reply
+        .code(404)
+        .type("text/html")
+        .send(brandStandalonePage("No encontrado", "No encontramos esa asignación de cocina."))
+    }
+
+    if (!assignee.confirmedAt) {
+      await prisma.kitchenBatchAssignee.update({
+        where: { batchId_userId: { batchId: decoded.batchId, userId: decoded.userId } },
+        data: { confirmedAt: new Date() },
+      })
+    }
+
+    return reply
+      .type("text/html")
+      .send(
+        brandStandalonePage(
+          `¡Gracias por ayudarnos, ${user.name.split(" ")[0]}!`,
+          "Quedaste confirmado/a para cocinar. ¡Buena cocina! 🍲💜",
+        ),
       )
   })
 }

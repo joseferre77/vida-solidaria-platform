@@ -19,6 +19,12 @@ import { enablePushNotifications, getExistingSubscription, isInstalledStandalone
  *
  * Polling cada 25s — mismo criterio liviano que el chat de coordinadores
  * (Fase M), no hay Socket.IO conectado a esto todavía.
+ *
+ * Fase R (25/09/2026): el menú desplegable pasa a fondo oscuro (tinta,
+ * #2A1030) con texto papel — Josecito reportó bajo contraste leyendo
+ * notificaciones con el esquema claro anterior. Se mantiene el resto de la
+ * app (barra superior, etc.) igual, el pedido es puntual para acá y para
+ * el push del celular (ver lib/push.ts / app/sw.ts).
  */
 function timeAgo(iso: string) {
   const diffMs = Date.now() - new Date(iso).getTime()
@@ -117,17 +123,17 @@ export function NotificationBell() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-1 w-80 max-w-[90vw] overflow-hidden rounded-xl border border-violeta/15 bg-papel shadow-lg">
+          <div className="absolute right-0 top-full z-50 mt-1 w-80 max-w-[90vw] overflow-hidden rounded-xl border border-papel/10 bg-tinta shadow-xl">
             {(pushState === "off" || pushState === "needs-install") && (
-              <div className="border-b border-violeta/10 bg-violeta/5 p-3">
+              <div className="border-b border-papel/10 bg-papel/5 p-3">
                 {pushState === "needs-install" ? (
-                  <p className="text-xs text-tinta/80">
+                  <p className="text-xs text-papel/85">
                     Para recibir avisos reales en este iPhone, primero agregá la app a tu pantalla de inicio (botón
                     Compartir → "Agregar a inicio") y volvé a entrar desde ahí.
                   </p>
                 ) : (
                   <>
-                    <p className="mb-2 text-xs text-tinta/80">Activá los avisos reales en este celular.</p>
+                    <p className="mb-2 text-xs text-papel/85">Activá los avisos reales en este celular.</p>
                     <button
                       onClick={handleEnablePush}
                       disabled={enabling}
@@ -141,8 +147,8 @@ export function NotificationBell() {
               </div>
             )}
 
-            <div className="flex items-center justify-between border-b border-violeta/10 px-3 py-2">
-              <span className="text-xs font-semibold text-tinta">Notificaciones</span>
+            <div className="flex items-center justify-between border-b border-papel/10 px-3 py-2">
+              <span className="text-xs font-semibold text-papel">Notificaciones</span>
               {unreadCount > 0 && (
                 <button
                   onClick={() => {
@@ -150,7 +156,7 @@ export function NotificationBell() {
                     setItems((prev) => prev.map((i) => ({ ...i, readAt: i.readAt ?? new Date().toISOString() })))
                     setUnreadCount(0)
                   }}
-                  className="text-[11px] text-violeta hover:underline"
+                  className="text-[11px] font-medium text-amarillo hover:underline"
                 >
                   Marcar todas como leídas
                 </button>
@@ -158,21 +164,21 @@ export function NotificationBell() {
             </div>
 
             <div className="max-h-80 overflow-y-auto">
-              {items.length === 0 && <p className="px-3 py-6 text-center text-xs text-tinta/60">Sin notificaciones todavía.</p>}
+              {items.length === 0 && <p className="px-3 py-6 text-center text-xs text-papel/60">Sin notificaciones todavía.</p>}
               {items.map((n) => (
                 <button
                   key={n.id}
                   onClick={() => handleClickItem(n)}
-                  className={`block w-full border-b border-violeta/5 px-3 py-2.5 text-left hover:bg-violeta/5 ${
-                    !n.readAt ? "bg-amarillo/10" : ""
+                  className={`block w-full border-b border-papel/5 px-3 py-2.5 text-left hover:bg-papel/10 ${
+                    !n.readAt ? "bg-amarillo/15" : ""
                   }`}
                 >
                   <div className="flex items-start gap-2">
-                    {!n.readAt && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-orange" />}
+                    {!n.readAt && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amarillo" />}
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-semibold text-tinta">{n.title}</p>
-                      {n.body && <p className="mt-0.5 line-clamp-2 text-[11px] text-tinta/70">{n.body}</p>}
-                      <p className="mt-0.5 text-[10px] text-tinta/50">{timeAgo(n.createdAt)}</p>
+                      <p className="truncate text-xs font-semibold text-papel">{n.title}</p>
+                      {n.body && <p className="mt-0.5 line-clamp-2 text-[11px] text-papel/75">{n.body}</p>}
+                      <p className="mt-0.5 text-[10px] text-papel/50">{timeAgo(n.createdAt)}</p>
                     </div>
                   </div>
                 </button>

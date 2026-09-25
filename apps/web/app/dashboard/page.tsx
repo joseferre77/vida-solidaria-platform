@@ -12,7 +12,21 @@ import {
   type DashboardSummary,
   type ProjectListItem,
 } from "../../lib/projects"
-import { KITCHEN_STATUS_LABEL, listMyKitchenBatches, type KitchenBatchItem } from "../../lib/logistics"
+import {
+  KITCHEN_STATUS_LABEL,
+  listMyKitchenBatches,
+  getMyStock,
+  getMyStockCatalog,
+  createMyStockIngreso,
+  transferMyStock,
+  STOCK_UNITS,
+  STOCK_UNIT_LABEL,
+  type KitchenBatchItem,
+  type MyStockRow,
+  type StockCatalogEntry,
+  type StockUnit,
+} from "../../lib/logistics"
+import { listBasicUsers, type BasicUser } from "../../lib/projects"
 import { formatDate, formatMinutes, formatMoney, timeAgo } from "../../lib/format"
 
 // Orden categórico fijo (nunca ciclado) para los widgets de distribución —
@@ -28,6 +42,9 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [projects, setProjects] = useState<ProjectListItem[] | null>(null)
   const [myKitchenBatches, setMyKitchenBatches] = useState<KitchenBatchItem[] | null>(null)
+  const [myStock, setMyStock] = useState<MyStockRow[] | null>(null)
+  const [stockCatalog, setStockCatalog] = useState<StockCatalogEntry[] | null>(null)
+  const [basicUsers, setBasicUsers] = useState<BasicUser[] | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -53,6 +70,18 @@ export default function DashboardPage() {
     listMyKitchenBatches()
       .then(setMyKitchenBatches)
       .catch(() => setMyKitchenBatches(null))
+    // Fase R — "Mi depósito": autogestionado igual que lo de arriba,
+    // cualquier usuario logueado ve y carga lo que tiene guardado en su
+    // casa, sin requerir logistics.write.
+    getMyStock()
+      .then(setMyStock)
+      .catch(() => setMyStock(null))
+    getMyStockCatalog()
+      .then(setStockCatalog)
+      .catch(() => setStockCatalog(null))
+    listBasicUsers()
+      .then(setBasicUsers)
+      .catch(() => setBasicUsers(null))
   }
 
   useEffect(() => {
@@ -119,6 +148,14 @@ export default function DashboardPage() {
       )}
 
       <MyKitchenBatchWidget batches={myKitchenBatches} />
+
+      <MyDepositWidget
+        rows={myStock}
+        catalog={stockCatalog}
+        users={basicUsers}
+        currentUserId={user?.id ?? null}
+        onChanged={refresh}
+      />
 
       <RoleGate user={user ?? null} permission="projects.read">
         <p className="mb-2 text-[11px] uppercase tracking-wide text-cream/40">
@@ -265,6 +302,288 @@ function MyKitchenBatchWidget({ batches }: { batches: KitchenBatchItem[] | null 
           </div>
         )
       })}
+    </section>
+  )
+}
+
+// Fase R (25/09/2026) — "Mi depósito": pedido de Josecito, con el ejemplo
+// de Patricio (arroz/lentejas/té que le quedan en su casa cuando recibe
+// una donación en vez de llevarla directo al depósito central). Cualquier
+// usuario activo puede cargar lo que le donaron y traspasarlo — no
+// requiere logistics.write, que da acceso a TODO el módulo de stock/cocina.
+// Siempre visible (a diferencia de MyKitchenBatchWidget, que se esconde si
+// no hay nada activo) porque es una herramienta de carga, no solo un
+// resumen — la acción "cargar donación" tiene que estar siempre a mano.
+function MyDepositWidget({
+  rows,
+  catalog,
+  users,
+  currentUserId,
+  onChanged,
+}: {
+  rows: MyStockRow[] | null
+  catalog: StockCatalogEntry[] | null
+  users: BasicUser[] | null
+  currentUserId: string | null
+  onChanged: () => void
+}) {
+  const [showForm, setShowForm] = useState(false)
+  const [mode, setMode] = useState<"existing" | "new">("existing")
+  const [stockItemId, setStockItemId] = useState("")
+  const [newItemName, setNewItemName] = useState("")
+  const [newItemUnit, setNewItemUnit] = useState<StockUnit>("kg")
+  const [quantity, setQuantity] = useState("")
+  const [reason, setReason] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const [transferOpenFor, setTransferOpenFor] = useState<string | null>(null)
+  const [transferTo, setTransferTo] = useState("")
+  const [transferQty, setTransferQty] = useState("")
+  const [transferBusy, setTransferBusy] = useState(false)
+  const [transferError, setTransferError] = useState<string | null>(null)
+
+  function resetForm() {
+    setStockItemId("")
+    setNewItemName("")
+    setNewItemUnit("kg")
+    setQuantity("")
+    setReason("")
+    setError(null)
+  }
+
+  function submitIngreso() {
+    const qty = Number(quantity)
+    if (!qty || qty <= 0) {
+      setError("Ingresá una cantidad válida")
+      return
+    }
+    if (mode === "existing" && !stockItemId) {
+      setError("Elegí qué insumo cargaste")
+      return
+    }
+    if (mode === "new" && newItemName.trim().length < 2) {
+      setError("Ingresá el nombre de lo que te donaron")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    createMyStockIngreso({
+      stockItemId: mode === "existing" ? stockItemId : undefined,
+      newItemName: mode === "new" ? newItemName.trim() : undefined,
+      unit: mode === "new" ? newItemUnit : undefined,
+      quantity: qty,
+      reason: reason.trim() || undefined,
+    })
+      .then(() => {
+        resetForm()
+        setShowForm(false)
+        onChanged()
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setSaving(false))
+  }
+
+  function submitTransfer(stockItemId: string) {
+    const qty = Number(transferQty)
+    if (!qty || qty <= 0) {
+      setTransferError("Ingresá una cantidad válida")
+      return
+    }
+    setTransferBusy(true)
+    setTransferError(null)
+    transferMyStock(stockItemId, {
+      toHolderUserId: transferTo || null,
+      quantity: qty,
+    })
+      .then(() => {
+        setTransferOpenFor(null)
+        setTransferTo("")
+        setTransferQty("")
+        onChanged()
+      })
+      .catch((e) => setTransferError(e.message))
+      .finally(() => setTransferBusy(false))
+  }
+
+  return (
+    <section className="mb-6 rounded-2xl border border-white/15 bg-white/5 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h2 className="font-display text-sm font-semibold text-cream/90">Mi depósito</h2>
+          <p className="mt-0.5 text-xs text-cream/50">
+            Lo que te donaron y quedó en tu casa — para que cocina sepa dónde está cada cosa.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setShowForm((v) => !v)
+            resetForm()
+          }}
+          className="shrink-0 rounded-xl bg-yellow px-3 py-1.5 text-xs font-semibold text-purple-deep hover:opacity-90"
+        >
+          {showForm ? "Cancelar" : "+ Cargar donación"}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="mt-3 rounded-xl border border-white/10 bg-black/10 p-3">
+          <div className="mb-2 flex gap-1.5 text-xs">
+            <button
+              onClick={() => setMode("existing")}
+              className={`rounded-lg px-2.5 py-1 ${mode === "existing" ? "bg-yellow text-purple-deep font-semibold" : "border border-white/20 text-cream/70"}`}
+            >
+              Ya existe
+            </button>
+            <button
+              onClick={() => setMode("new")}
+              className={`rounded-lg px-2.5 py-1 ${mode === "new" ? "bg-yellow text-purple-deep font-semibold" : "border border-white/20 text-cream/70"}`}
+            >
+              Es nuevo
+            </button>
+          </div>
+
+          {mode === "existing" ? (
+            <select
+              value={stockItemId}
+              onChange={(e) => setStockItemId(e.target.value)}
+              className="mb-2 w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream outline-none focus:border-yellow"
+            >
+              <option value="" className="bg-papel text-tinta">
+                ¿Qué te donaron?
+              </option>
+              {(catalog ?? []).map((c) => (
+                <option key={c.id} value={c.id} className="bg-papel text-tinta">
+                  {c.icon ? `${c.icon} ` : ""}
+                  {c.name} ({STOCK_UNIT_LABEL[c.unit]})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="mb-2 flex gap-2">
+              <input
+                type="text"
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                placeholder="Nombre (ej. Arroz)"
+                className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream placeholder:text-cream/30 outline-none focus:border-yellow"
+              />
+              <select
+                value={newItemUnit}
+                onChange={(e) => setNewItemUnit(e.target.value as StockUnit)}
+                className="rounded-lg border border-white/20 bg-white/5 px-2 py-2 text-sm text-cream outline-none focus:border-yellow"
+              >
+                {STOCK_UNITS.map((u) => (
+                  <option key={u} value={u} className="bg-papel text-tinta">
+                    {STOCK_UNIT_LABEL[u]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="mb-2 flex gap-2">
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder="Cantidad"
+              className="w-28 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream placeholder:text-cream/30 outline-none focus:border-yellow"
+            />
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Nota (opcional, ej. quién lo donó)"
+              className="flex-1 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-cream placeholder:text-cream/30 outline-none focus:border-yellow"
+            />
+          </div>
+
+          {error && <p className="mb-2 text-xs text-orange">{error}</p>}
+
+          <button
+            onClick={submitIngreso}
+            disabled={saving}
+            className="w-full rounded-lg bg-yellow py-2 text-sm font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+          >
+            {saving ? "Guardando..." : "Guardar en mi depósito"}
+          </button>
+        </div>
+      )}
+
+      {rows && rows.length > 0 && (
+        <ul className="mt-3 space-y-1.5">
+          {rows.map((r) => (
+            <li key={r.stockItem.id} className="rounded-lg border border-white/10 bg-black/10 px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-cream">
+                  {r.stockItem.icon ? `${r.stockItem.icon} ` : ""}
+                  {r.stockItem.name}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-cream">
+                    {r.quantity} {STOCK_UNIT_LABEL[r.stockItem.unit]}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setTransferOpenFor(transferOpenFor === r.stockItem.id ? null : r.stockItem.id)
+                      setTransferTo("")
+                      setTransferQty("")
+                      setTransferError(null)
+                    }}
+                    className="text-xs text-yellow hover:underline"
+                  >
+                    Traspasar
+                  </button>
+                </div>
+              </div>
+              {transferOpenFor === r.stockItem.id && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-white/10 pt-2">
+                  <select
+                    value={transferTo}
+                    onChange={(e) => setTransferTo(e.target.value)}
+                    className="rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream outline-none focus:border-yellow"
+                  >
+                    <option value="" className="bg-papel text-tinta">
+                      Al depósito central
+                    </option>
+                    {(users ?? [])
+                      .filter((u) => u.id !== currentUserId)
+                      .map((u) => (
+                        <option key={u.id} value={u.id} className="bg-papel text-tinta">
+                          A lo de {u.name}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={transferQty}
+                    onChange={(e) => setTransferQty(e.target.value)}
+                    placeholder="Cantidad"
+                    className="w-24 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-xs text-cream placeholder:text-cream/30 outline-none focus:border-yellow"
+                  />
+                  <button
+                    onClick={() => submitTransfer(r.stockItem.id)}
+                    disabled={transferBusy}
+                    className="rounded-lg bg-yellow px-3 py-1 text-xs font-semibold text-purple-deep hover:opacity-90 disabled:opacity-50"
+                  >
+                    Confirmar
+                  </button>
+                  {transferError && <p className="w-full text-[11px] text-orange">{transferError}</p>}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {(!rows || rows.length === 0) && !showForm && (
+        <p className="mt-3 text-xs text-cream/40">Todavía no tenés nada cargado en tu depósito.</p>
+      )}
     </section>
   )
 }

@@ -33,7 +33,10 @@ import type { FastifyInstance } from "fastify"
 import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
-import { notify, usersWithPermission } from "../../lib/notify"
+import { notify, usersWithPermission, usersWithRoles } from "../../lib/notify"
+import { brandEmailWrapper, brandButton } from "../../lib/brand-email"
+import { env } from "../../config/env"
+import { signKitchenConfirmToken } from "../../lib/kitchen-confirm-token"
 
 const STOCK_UNITS = ["kg", "litros", "unidades", "paquetes", "cajas"] as const
 
@@ -57,6 +60,37 @@ const movementSchema = z.object({
   type: z.enum(["ingreso", "egreso"]),
   quantity: z.number().positive(),
   reason: z.string().trim().optional(),
+  // Fase R: quién tiene la mercadería después de este movimiento — null
+  // (default) es el depósito central. Solo tiene sentido en un "ingreso"
+  // (ej. logística carga a mano una donación que ya sabe que quedó en la
+  // casa de alguien); en un "egreso" se ignora.
+  holderUserId: z.string().uuid().nullable().optional(),
+})
+
+// Fase R: alta desde la vista personal ("Mi depósito") — cualquier usuario
+// activo puede cargar lo que le donaron directamente en su propia casa, sin
+// necesitar logistics.write (que da acceso a TODO el módulo). Si el insumo
+// todavía no existe en el catálogo, se puede crear uno mínimo al vuelo
+// (nombre + unidad) — igual criterio que "cantidad inicial al crear".
+const myIngresoSchema = z.object({
+  stockItemId: z.string().uuid().optional(),
+  newItemName: z.string().trim().min(2).optional(),
+  unit: z.enum(STOCK_UNITS).optional(),
+  quantity: z.number().positive(),
+  reason: z.string().trim().optional(),
+})
+
+const myTransferSchema = z.object({
+  // Destino: null = depósito central. Si se pasa otro userId, va derecho a
+  // la casa de esa persona (ej. Patricio le pasa la mercadería a Lourdes
+  // directamente, sin pasar por central).
+  toHolderUserId: z.string().uuid().nullable(),
+  quantity: z.number().positive(),
+  notes: z.string().trim().optional(),
+  // Solo lo puede usar quien tiene logistics.write, para corregir un
+  // traspaso a nombre de otra persona — si no se manda, sale de "mi propio
+  // depósito" (el usuario autenticado).
+  fromHolderUserId: z.string().uuid().nullable().optional(),
 })
 
 const batchSchema = z.object({
@@ -142,6 +176,83 @@ async function currentQuantity(stockItemId: string) {
   const inQty = Number(ingresos._sum.quantity ?? 0)
   const outQty = Number(egresos._sum.quantity ?? 0)
   return inQty - outQty
+}
+
+/** Fase R: cantidad neta por depósito (null = central) — mismo criterio
+ * que currentQuantity, pero agrupado por holderUserId en vez de sumar
+ * todo junto. Devuelve un Map<holderUserId | null, cantidad neta>. */
+async function quantityByHolder(stockItemId: string): Promise<Map<string | null, number>> {
+  const rows = await prisma.stockMovement.groupBy({
+    by: ["holderUserId", "type"],
+    where: { stockItemId },
+    _sum: { quantity: true },
+  })
+  const map = new Map<string | null, number>()
+  for (const row of rows) {
+    const amount = Number(row._sum.quantity ?? 0)
+    const delta = row.type === "ingreso" ? amount : -amount
+    map.set(row.holderUserId, (map.get(row.holderUserId) ?? 0) + delta)
+  }
+  return map
+}
+
+/** Arma el array `byHolder` que ve el frontend ("dónde está cada cosa") a
+ * partir del Map de quantityByHolder — descarta entradas en ~0 (redondeo)
+ * y pone primero el depósito central. */
+async function serializeByHolder(qtyMap: Map<string | null, number>) {
+  const users = await userMapFor(Array.from(qtyMap.keys()))
+  const rows = Array.from(qtyMap.entries())
+    .filter(([, qty]) => Math.abs(qty) > 0.0001)
+    .map(([holderUserId, quantity]) => ({
+      holderUserId,
+      holder: holderUserId ? (users.get(holderUserId) ?? null) : null,
+      holderLabel: holderUserId ? (users.get(holderUserId)?.name ?? "Usuario eliminado") : "Depósito central",
+      quantity,
+    }))
+  rows.sort((a, b) => (a.holderUserId === null ? -1 : b.holderUserId === null ? 1 : a.holderLabel.localeCompare(b.holderLabel)))
+  return rows
+}
+
+/** Fase R: avisa (sistema + email) cuando entra mercadería nueva al
+ * sistema — a Dirección General y Coordinación Logística (que hoy es quien
+ * maneja stock/cocina), más Admin General (siempre incluido por
+ * usersWithPermission). A propósito NO se llama desde la reversión de un
+ * ingrediente de cocina (eso no es "entró una donación", es una
+ * corrección contable) — solo desde los altas genuinas de stock. */
+async function notifyNewDonation(
+  item: { id: string; name: string; unit: string },
+  quantity: number,
+  holderUserId: string | null,
+  actorId: string,
+) {
+  const [logisticsUsers, directors, actor, holder] = await Promise.all([
+    usersWithPermission("logistics.write"),
+    usersWithRoles(["direccion_general"]),
+    prisma.user.findUnique({ where: { id: actorId }, select: { name: true } }),
+    holderUserId ? prisma.user.findUnique({ where: { id: holderUserId }, select: { name: true } }) : Promise.resolve(null),
+  ])
+  const recipientIds = Array.from(new Set([...logisticsUsers.map((u) => u.id), ...directors.map((u) => u.id)]))
+  if (recipientIds.length === 0) return
+
+  const whereLabel = holder ? `en la casa de ${holder.name}` : "directo al depósito central"
+  const title = `Nueva donación: ${item.name}`
+  const body = `${actor?.name ?? "Alguien"} cargó ${quantity} ${item.unit} de "${item.name}" — quedó ${whereLabel}.`
+
+  await notify(recipientIds, {
+    title,
+    body,
+    type: "stock_donation",
+    link: "/equipos?tab=stock",
+    email: {
+      subject: title,
+      html: brandEmailWrapper(
+        `<h2 style="margin:0 0 12px; font-size:19px;">🎁 Entró una donación</h2>
+         <p style="margin:0 0 8px; font-size:15px; line-height:1.5;">${body}</p>
+         <p style="margin:16px 0 0; font-size:13px; color:#2A1030; opacity:0.65;">Lo podés ver en el detalle del insumo, dentro de Equipos → Stock.</p>`,
+        title,
+      ),
+    },
+  })
 }
 
 /** Si el insumo tiene punto de pedido y la cantidad ACABA de cruzarlo hacia
@@ -262,6 +373,7 @@ async function serializeStockItem(item: {
   const active = item.custodies[0] ?? null
   const users = active ? await userMapFor([active.holderUserId]) : null
   const qty = item.isReusable ? null : await currentQuantity(item.id)
+  const byHolder = item.isReusable ? [] : await serializeByHolder(await quantityByHolder(item.id))
   const unitCost = item.unitCost === null ? null : Number(item.unitCost)
   const reorderPoint = item.reorderPoint === null ? null : Number(item.reorderPoint)
   return {
@@ -277,6 +389,9 @@ async function serializeStockItem(item: {
     restockTarget: item.restockTarget === null ? null : Number(item.restockTarget),
     createdAt: item.createdAt,
     currentQuantity: qty,
+    // Fase R: dónde está cada cosa — depósito central + casas de
+    // coordinadores, cada uno con su cantidad neta (ver quantityByHolder).
+    byHolder,
     totalValue: qty !== null && unitCost !== null ? qty * unitCost : null,
     belowReorderPoint: qty !== null && reorderPoint !== null ? qty <= reorderPoint : false,
     activeCustody: active
@@ -323,10 +438,10 @@ async function serializeStockItemsBatch(
   }[],
 ) {
   const nonReusableIds = items.filter((i) => !i.isReusable).map((i) => i.id)
-  const [movementSums, users] = await Promise.all([
+  const [movementSums, custodyUsers] = await Promise.all([
     nonReusableIds.length > 0
       ? prisma.stockMovement.groupBy({
-          by: ["stockItemId", "type"],
+          by: ["stockItemId", "holderUserId", "type"],
           where: { stockItemId: { in: nonReusableIds } },
           _sum: { quantity: true },
         })
@@ -335,15 +450,38 @@ async function serializeStockItemsBatch(
   ])
 
   const qtyMap = new Map<string, number>()
+  // Fase R: además del total (qtyMap), se arma el desglose por depósito acá
+  // mismo, en la misma pasada — evita repetir la query por insumo.
+  const byHolderMap = new Map<string, Map<string | null, number>>()
   for (const row of movementSums) {
     const amount = Number(row._sum.quantity ?? 0)
     const delta = row.type === "ingreso" ? amount : -amount
     qtyMap.set(row.stockItemId, (qtyMap.get(row.stockItemId) ?? 0) + delta)
+    const holderMap = byHolderMap.get(row.stockItemId) ?? new Map<string | null, number>()
+    holderMap.set(row.holderUserId, (holderMap.get(row.holderUserId) ?? 0) + delta)
+    byHolderMap.set(row.stockItemId, holderMap)
   }
+
+  const holderIds = movementSums.map((r) => r.holderUserId).filter((id): id is string => Boolean(id))
+  const holderUsers = await userMapFor(holderIds)
+  const users = new Map([...custodyUsers, ...holderUsers])
 
   return items.map((item) => {
     const active = item.custodies[0] ?? null
     const qty = item.isReusable ? null : (qtyMap.get(item.id) ?? 0)
+    const byHolder = item.isReusable
+      ? []
+      : Array.from((byHolderMap.get(item.id) ?? new Map<string | null, number>()).entries())
+          .filter(([, q]) => Math.abs(q) > 0.0001)
+          .map(([holderUserId, quantity]) => ({
+            holderUserId,
+            holder: holderUserId ? (users.get(holderUserId) ?? null) : null,
+            holderLabel: holderUserId ? (users.get(holderUserId)?.name ?? "Usuario eliminado") : "Depósito central",
+            quantity,
+          }))
+          .sort((a, b) =>
+            a.holderUserId === null ? -1 : b.holderUserId === null ? 1 : a.holderLabel.localeCompare(b.holderLabel),
+          )
     const unitCost = item.unitCost === null ? null : Number(item.unitCost)
     const reorderPoint = item.reorderPoint === null ? null : Number(item.reorderPoint)
     return {
@@ -359,6 +497,7 @@ async function serializeStockItemsBatch(
       restockTarget: item.restockTarget === null ? null : Number(item.restockTarget),
       createdAt: item.createdAt,
       currentQuantity: qty,
+      byHolder,
       totalValue: qty !== null && unitCost !== null ? qty * unitCost : null,
       belowReorderPoint: qty !== null && reorderPoint !== null ? qty <= reorderPoint : false,
       activeCustody: active
@@ -478,6 +617,10 @@ export async function logisticsRoutes(app: FastifyInstance) {
           createdBy: request.user!.sub,
         },
       })
+      // Fase R: también avisa acá — un insumo nuevo con cantidad de arranque
+      // es en la práctica una donación recién cargada, mismo criterio que
+      // el POST de movimientos.
+      await notifyNewDonation(item, body.initialQuantity, null, request.user!.sub)
     }
     return reply.code(201).send(await serializeStockItem(item))
   })
@@ -623,10 +766,20 @@ export async function logisticsRoutes(app: FastifyInstance) {
       }
       const qtyBefore = await currentQuantity(id)
       await prisma.stockMovement.create({
-        data: { stockItemId: id, type: body.type, quantity: body.quantity, reason: body.reason || null, createdBy: request.user!.sub },
+        data: {
+          stockItemId: id,
+          type: body.type,
+          quantity: body.quantity,
+          reason: body.reason || null,
+          holderUserId: body.type === "ingreso" ? (body.holderUserId ?? null) : null,
+          createdBy: request.user!.sub,
+        },
       })
       const qtyAfter = await currentQuantity(id)
       if (body.type === "egreso") await maybeAlertLowStock(id, qtyBefore, qtyAfter)
+      if (body.type === "ingreso") {
+        await notifyNewDonation(item, body.quantity, body.holderUserId ?? null, request.user!.sub)
+      }
       const updated = await prisma.stockItem.findUniqueOrThrow({ where: { id }, include: STOCK_ITEM_INCLUDE })
       return reply.code(201).send(await serializeStockItem(updated))
     },
@@ -736,6 +889,139 @@ export async function logisticsRoutes(app: FastifyInstance) {
       }))
     },
   )
+
+  // ── Fase R: "Mi depósito" — autogestión de donaciones que quedan en la
+  // casa de un coordinador en vez de ir directo al depósito central (ver
+  // holderUserId en StockMovement). Cualquier usuario activo puede cargar
+  // lo que le donaron y traspasar lo que tiene — no requiere
+  // logistics.write, que da acceso a TODO el módulo, esto es autogestión
+  // de lo propio (mismo criterio que /kitchen-batches/mine). ──
+  // Catálogo mínimo para el selector de "ya existe" en la carga desde "Mi
+  // depósito" — a propósito SIN requirePermission("logistics.read"): quien
+  // no tiene ese permiso también tiene que poder elegir "Arroz" en vez de
+  // sin querer crear un "Arroz" (2) duplicado porque no podía ver que ya
+  // existía. Devuelve lo mínimo (ni costo, ni punto de pedido) para no
+  // filtrar datos que sí están detrás de logistics.read.
+  app.get("/my-stock/catalog", { preHandler: requireAuth }, async () => {
+    const items = await prisma.stockItem.findMany({
+      where: { isReusable: false },
+      select: { id: true, name: true, unit: true, icon: true },
+      orderBy: { name: "asc" },
+    })
+    return items
+  })
+
+  app.get("/my-stock", { preHandler: requireAuth }, async (request) => {
+    const userId = request.user!.sub
+    const rows = await prisma.stockMovement.groupBy({
+      by: ["stockItemId", "type"],
+      where: { holderUserId: userId },
+      _sum: { quantity: true },
+    })
+    const qtyByItem = new Map<string, number>()
+    for (const row of rows) {
+      const amount = Number(row._sum.quantity ?? 0)
+      const delta = row.type === "ingreso" ? amount : -amount
+      qtyByItem.set(row.stockItemId, (qtyByItem.get(row.stockItemId) ?? 0) + delta)
+    }
+    const itemIds = Array.from(qtyByItem.keys()).filter((id) => Math.abs(qtyByItem.get(id)!) > 0.0001)
+    if (itemIds.length === 0) return []
+    const items = await prisma.stockItem.findMany({ where: { id: { in: itemIds } } })
+    return items
+      .map((item) => ({
+        stockItem: { id: item.id, code: item.code, name: item.name, unit: item.unit, icon: item.icon },
+        quantity: qtyByItem.get(item.id) ?? 0,
+      }))
+      .sort((a, b) => a.stockItem.name.localeCompare(b.stockItem.name))
+  })
+
+  app.post("/my-stock/ingreso", { preHandler: requireAuth }, async (request, reply) => {
+    const body = myIngresoSchema.parse(request.body)
+    let item: { id: string; name: string; unit: string; isReusable: boolean }
+    if (body.stockItemId) {
+      const existing = await prisma.stockItem.findUniqueOrThrow({ where: { id: body.stockItemId } })
+      if (existing.isReusable) {
+        return reply.code(400).send({ error: "Este insumo es reusable (se presta, no se carga por acá)" })
+      }
+      item = existing
+    } else {
+      if (!body.newItemName || !body.unit) {
+        return reply.code(400).send({ error: "Si el insumo todavía no existe, hace falta nombre y unidad" })
+      }
+      const code = await nextStockCode()
+      item = await prisma.stockItem.create({ data: { code, name: body.newItemName, unit: body.unit, isReusable: false } })
+    }
+    await prisma.stockMovement.create({
+      data: {
+        stockItemId: item.id,
+        type: "ingreso",
+        quantity: body.quantity,
+        reason: body.reason || "Donación cargada desde Mi depósito",
+        holderUserId: request.user!.sub,
+        createdBy: request.user!.sub,
+      },
+    })
+    await notifyNewDonation(item, body.quantity, request.user!.sub, request.user!.sub)
+    return reply.code(201).send({ ok: true, stockItem: { id: item.id, name: item.name, unit: item.unit } })
+  })
+
+  // Traspaso entre depósitos: quien lo tiene lo pasa a otra persona o al
+  // central (toHolderUserId: null). Solo alguien con logistics.write puede
+  // traspasar algo que no está a su propio nombre (fromHolderUserId
+  // explícito) — pensado para corregir una carga que quedó a nombre de
+  // otra persona por error.
+  app.post("/my-stock/:stockItemId/traspaso", { preHandler: requireAuth }, async (request, reply) => {
+    const { stockItemId } = request.params as { stockItemId: string }
+    const body = myTransferSchema.parse(request.body)
+    const item = await prisma.stockItem.findUniqueOrThrow({ where: { id: stockItemId } })
+    if (item.isReusable) {
+      return reply.code(400).send({ error: "Este insumo es reusable, no aplica traspaso de stock" })
+    }
+    const canActForOthers = request.user!.permissions.includes("*") || request.user!.permissions.includes("logistics.write")
+    const fromHolderUserId = body.fromHolderUserId ?? request.user!.sub
+    if (fromHolderUserId !== request.user!.sub && !canActForOthers) {
+      return reply
+        .code(403)
+        .send({ error: "Solo podés traspasar lo que vos tenés — falta logistics.write para hacerlo a nombre de otra persona" })
+    }
+    if (fromHolderUserId === body.toHolderUserId) {
+      return reply.code(400).send({ error: "El origen y el destino son la misma persona" })
+    }
+    const qtyMap = await quantityByHolder(stockItemId)
+    const available = qtyMap.get(fromHolderUserId) ?? 0
+    if (body.quantity > available + 0.0001) {
+      return reply.code(400).send({ error: `No hay suficiente en ese depósito: quedan ${available} ${item.unit}` })
+    }
+    const transferId = crypto.randomUUID()
+    await prisma.$transaction([
+      prisma.stockMovement.create({
+        data: {
+          stockItemId,
+          type: "egreso",
+          quantity: body.quantity,
+          reason: body.notes || "Traspaso de depósito",
+          holderUserId: fromHolderUserId,
+          relatedEntityType: "stock_transfer",
+          relatedEntityId: transferId,
+          createdBy: request.user!.sub,
+        },
+      }),
+      prisma.stockMovement.create({
+        data: {
+          stockItemId,
+          type: "ingreso",
+          quantity: body.quantity,
+          reason: body.notes || "Traspaso de depósito",
+          holderUserId: body.toHolderUserId,
+          relatedEntityType: "stock_transfer",
+          relatedEntityId: transferId,
+          createdBy: request.user!.sub,
+        },
+      }),
+    ])
+    const updated = await prisma.stockItem.findUniqueOrThrow({ where: { id: stockItemId }, include: STOCK_ITEM_INCLUDE })
+    return reply.code(201).send(await serializeStockItem(updated))
+  })
 
   // ── Lotes de cocina ──
   app.get("/kitchen-batches", { preHandler: [requireAuth, requirePermission("logistics.read")] }, async () => {
@@ -963,12 +1249,52 @@ export async function logisticsRoutes(app: FastifyInstance) {
     async (request) => {
       const { id } = request.params as { id: string }
       const body = assigneeSchema.parse(request.body)
+      // Fase R: el mail de "te sumamos a cocinar" solo tiene sentido para
+      // una asignación NUEVA — si ya estaba asignado/a y esto es solo un
+      // cambio de taskLabel, no hay que volver a avisarle (ver notas de
+      // Josecito: el pedido es para cuando alguien queda seleccionado, no
+      // cada vez que se edita el lote).
+      const existing = await prisma.kitchenBatchAssignee.findUnique({
+        where: { batchId_userId: { batchId: id, userId: body.userId } },
+      })
       await prisma.kitchenBatchAssignee.upsert({
         where: { batchId_userId: { batchId: id, userId: body.userId } },
         update: { taskLabel: body.taskLabel || null },
         create: { batchId: id, userId: body.userId, taskLabel: body.taskLabel || null },
       })
       const batch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
+      if (!existing) {
+        const assignedUser = await prisma.user.findUnique({ where: { id: body.userId }, select: { name: true, email: true } })
+        if (assignedUser) {
+          const token = signKitchenConfirmToken(id, body.userId)
+          const link = `${env.PUBLIC_API_URL}/api/public/kitchen-batches/confirm?token=${token}`
+          const firstName = assignedUser.name.split(" ")[0]
+          const taskLine = body.taskLabel ? ` — tarea: <strong>${body.taskLabel}</strong>` : ""
+          await notify([body.userId], {
+            title: "Te sumaron a cocinar",
+            body: `Quedaste asignado/a a "${batch.name}"${body.taskLabel ? ` (${body.taskLabel})` : ""}. Confirmá que vas a poder.`,
+            type: "kitchen_assignment",
+            link: "/equipos?tab=cocina",
+            email: {
+              subject: `Fuiste seleccionado/a para cocinar: ${batch.name}`,
+              html: brandEmailWrapper(
+                `<h2 style="margin:0 0 12px; font-size:19px;">🍲 ¡Te sumamos a cocinar, ${firstName}!</h2>
+                 <p style="margin:0 0 8px; font-size:15px; line-height:1.5;">
+                   Quedaste asignado/a al lote <strong>"${batch.name}"</strong> para este finde${taskLine}.
+                 </p>
+                 <p style="margin:0 0 16px; font-size:15px; line-height:1.5;">
+                   Presioná el botón para confirmar que vas a poder ayudar.
+                 </p>
+                 ${brandButton("Confirmar que voy a cocinar", link)}
+                 <p style="font-size:13px; color:#2A1030; opacity:0.6; margin:16px 0 0;">
+                   Si no podés esta vez, avisale directamente a quien coordina cocina para que pueda reorganizarse a tiempo.
+                 </p>`,
+                `Te sumaron a cocinar: ${batch.name}`,
+              ),
+            },
+          })
+        }
+      }
       return serializeBatch(batch)
     },
   )
