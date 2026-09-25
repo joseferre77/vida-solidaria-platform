@@ -22,3 +22,18 @@ export const markNotificationRead = (id: string) =>
 
 export const markAllNotificationsRead = () =>
   apiFetch("/api/notifications/read-all", { method: "PATCH" }) as Promise<{ ok: true }>
+
+// Fase S — pantalla "Notificaciones" (historial completo, separado de la
+// campanita que ahora solo muestra lo no leído).
+export interface NotificationsHistoryResponse {
+  items: NotificationItem[]
+  page: number
+  hasMore: boolean
+  total: number
+}
+
+export const listNotificationsHistory = (page = 1) =>
+  apiFetch(`/api/notifications/history?page=${page}`) as Promise<NotificationsHistoryResponse>
+
+export const clearReadNotifications = () =>
+  apiFetch("/api/notifications/read", { method: "DELETE" }) as Promise<{ deleted: number }>

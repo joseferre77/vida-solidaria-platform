@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   listNotifications,
@@ -25,6 +26,12 @@ import { enablePushNotifications, getExistingSubscription, isInstalledStandalone
  * notificaciones con el esquema claro anterior. Se mantiene el resto de la
  * app (barra superior, etc.) igual, el pedido es puntual para acá y para
  * el push del celular (ver lib/push.ts / app/sw.ts).
+ *
+ * Fase S (25/09/2026): la campanita deja de acumular notificaciones viejas
+ * — GET /notifications ahora devuelve SOLO lo no leído, así que apenas se
+ * marca algo como leído (tocándolo o con "Marcar todas") desaparece de acá
+ * en vez de quedarse para siempre. El historial completo (leídas incluidas,
+ * con botón de limpiar) se movió a /notificaciones — "Ver todas" abajo.
  */
 function timeAgo(iso: string) {
   const diffMs = Date.now() - new Date(iso).getTime()
@@ -93,11 +100,12 @@ export function NotificationBell() {
   }
 
   async function handleClickItem(n: NotificationItem) {
-    if (!n.readAt) {
-      markNotificationRead(n.id).catch(() => {})
-      setItems((prev) => prev.map((i) => (i.id === n.id ? { ...i, readAt: new Date().toISOString() } : i)))
-      setUnreadCount((c) => Math.max(0, c - 1))
-    }
+    // Fase S: la campanita solo muestra no leídas — al tocar una, se
+    // marca leída Y se saca de la lista (no solo se le apaga el punto),
+    // porque acá ya no tiene sentido mostrar algo leído.
+    markNotificationRead(n.id).catch(() => {})
+    setItems((prev) => prev.filter((i) => i.id !== n.id))
+    setUnreadCount((c) => Math.max(0, c - 1))
     setOpen(false)
     if (n.link) router.push(n.link)
   }
@@ -153,7 +161,10 @@ export function NotificationBell() {
                 <button
                   onClick={() => {
                     markAllNotificationsRead().catch(() => {})
-                    setItems((prev) => prev.map((i) => ({ ...i, readAt: i.readAt ?? new Date().toISOString() })))
+                    // Fase S: al marcar todas como leídas, desaparecen de acá
+                    // (la campanita ya no las muestra) en vez de quedarse
+                    // apagadas en la lista.
+                    setItems([])
                     setUnreadCount(0)
                   }}
                   className="text-[11px] font-medium text-amarillo hover:underline"
@@ -164,7 +175,9 @@ export function NotificationBell() {
             </div>
 
             <div className="max-h-80 overflow-y-auto">
-              {items.length === 0 && <p className="px-3 py-6 text-center text-xs text-papel/60">Sin notificaciones todavía.</p>}
+              {items.length === 0 && (
+                <p className="px-3 py-6 text-center text-xs text-papel/60">No tenés notificaciones nuevas.</p>
+              )}
               {items.map((n) => (
                 <button
                   key={n.id}
@@ -184,6 +197,14 @@ export function NotificationBell() {
                 </button>
               ))}
             </div>
+
+            <Link
+              href="/notificaciones"
+              onClick={() => setOpen(false)}
+              className="block border-t border-papel/10 px-3 py-2 text-center text-xs font-medium text-amarillo hover:underline"
+            >
+              Ver todas →
+            </Link>
           </div>
         </>
       )}
