@@ -125,4 +125,11 @@ export const regeneratePassword = (id: string) =>
 // Baja definitiva — a diferencia de updateUser(id, {status:"suspended"}),
 // esto borra la fila de verdad. Puede fallar con un 409 si la persona
 // tiene gastos/notas de proyecto a su nombre (ver nota en el backend).
-export const deleteUser = (id: string) => apiFetch(`/api/users/${id}`, { method: "DELETE" }) as Promise<null>
+// Fase V: fix bug reportado por Josecito ("Error interno" al borrar un
+// usuario de prueba) — apiFetch siempre manda Content-Type: application/json,
+// y sin un body Fastify rechaza la request entera con
+// FST_ERR_CTP_EMPTY_JSON_BODY antes de que llegue al handler (se veía como
+// un 500 genérico). rejectUser/regeneratePassword de acá arriba ya evitan
+// esto mandando body: "{}" — a deleteUser se le había pasado por alto.
+export const deleteUser = (id: string) =>
+  apiFetch(`/api/users/${id}`, { method: "DELETE", body: "{}" }) as Promise<null>
