@@ -300,7 +300,7 @@ async function serializeBatch(batch: {
   responsibleUserId: string | null
   createdAt: Date
   ingredients: { stockItemId: string; quantityAssigned: unknown; stockItem: { id: string; name: string; unit: string } }[]
-  assignees: { userId: string; taskLabel: string | null }[]
+  assignees: { userId: string; taskLabel: string | null; confirmedAt: Date | null }[]
   statusHistory: { id: string; toStatus: string; changedBy: string; changedAt: Date }[]
   custodies: {
     id: string
@@ -333,7 +333,9 @@ async function serializeBatch(batch: {
       unit: i.stockItem.unit,
       quantityAssigned: i.quantityAssigned,
     })),
-    assignees: batch.assignees.map((a) => ({ ...users.get(a.userId), taskLabel: a.taskLabel })),
+    // Fase R: confirmedAt — para que cocina vea quién ya tocó el link del
+    // mail ("fuiste seleccionado para cocinar") y quién todavía no contestó.
+    assignees: batch.assignees.map((a) => ({ ...users.get(a.userId), taskLabel: a.taskLabel, confirmedAt: a.confirmedAt })),
     statusHistory: batch.statusHistory.map((h) => ({
       toStatus: h.toStatus,
       changedAt: h.changedAt,
@@ -546,7 +548,9 @@ async function serializeBatchesBatch(batches: Parameters<typeof serializeBatch>[
       unit: i.stockItem.unit,
       quantityAssigned: i.quantityAssigned,
     })),
-    assignees: batch.assignees.map((a) => ({ ...users.get(a.userId), taskLabel: a.taskLabel })),
+    // Fase R: confirmedAt — para que cocina vea quién ya tocó el link del
+    // mail ("fuiste seleccionado para cocinar") y quién todavía no contestó.
+    assignees: batch.assignees.map((a) => ({ ...users.get(a.userId), taskLabel: a.taskLabel, confirmedAt: a.confirmedAt })),
     statusHistory: batch.statusHistory.map((h) => ({
       toStatus: h.toStatus,
       changedAt: h.changedAt,

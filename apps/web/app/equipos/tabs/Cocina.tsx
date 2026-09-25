@@ -548,6 +548,17 @@ function BatchDetailModal({
                 <span>
                   {a.name}
                   {a.taskLabel && <span className="text-cream/50"> — {a.taskLabel}</span>}
+                  {/* Fase R: si ya tocó el link del mail de confirmación, se ve acá
+                      — sin bloquear nada, es solo una señal para cocina. */}
+                  {a.confirmedAt ? (
+                    <span className="ml-2 rounded-full bg-green-500/15 px-2 py-0.5 text-[10px] font-medium text-green-300">
+                      ✓ Confirmó
+                    </span>
+                  ) : (
+                    <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-cream/40">
+                      Sin confirmar
+                    </span>
+                  )}
                 </span>
                 <button
                   onClick={() => removeKitchenBatchAssignee(batch.id, a.id).then(refresh).catch((e) => setError(e.message))}

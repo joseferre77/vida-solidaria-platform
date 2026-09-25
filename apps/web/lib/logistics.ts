@@ -132,6 +132,9 @@ export interface KitchenBatchIngredientItem {
 
 export interface KitchenBatchAssigneeItem extends BasicUser {
   taskLabel: string | null
+  // Fase R: cuándo tocó el link de "confirmá que vas a cocinar" del mail —
+  // null si todavía no contestó (no bloquea nada, es solo una señal).
+  confirmedAt: string | null
 }
 
 // Fase L — equipamiento reusable (conservadora, olla) sumado al kit de este
