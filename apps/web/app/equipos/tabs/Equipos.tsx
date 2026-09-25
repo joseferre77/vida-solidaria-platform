@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { listBasicUsers, type BasicUser } from "../../../lib/projects"
-import { nextSundayISO, formatDate } from "../../../lib/format"
+import { nextSundayISO, formatDateOnly } from "../../../lib/format"
 import {
   addFieldTeamMember,
   createFieldTeam,
@@ -70,7 +70,7 @@ export function Equipos() {
       </div>
 
       <p className="mb-4 text-xs text-cream/50">
-        Mostrando integrantes confirmados para el domingo {formatDate(week)}. {teams.length}{" "}
+        Mostrando integrantes confirmados para el domingo {formatDateOnly(week)}. {teams.length}{" "}
         {teams.length === 1 ? "equipo" : "equipos"} en total (los equipos son permanentes; los integrantes se arman
         semana a semana).
       </p>
@@ -293,7 +293,7 @@ function MembersModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-md rounded-2xl border border-white/15 bg-purple-deep p-6">
         <h2 className="mb-1 font-display text-lg font-bold text-yellow">Integrantes de {team.name}</h2>
-        <p className="mb-4 text-xs text-cream/50">Semana del {formatDate(weekStartDate)}</p>
+        <p className="mb-4 text-xs text-cream/50">Semana del {formatDateOnly(weekStartDate)}</p>
 
         <div className="mb-4 space-y-2">
           {members.map((m) => (

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { fetchMe, type SessionUser } from "../../lib/auth"
-import { nextSundayISO, formatDate } from "../../lib/format"
+import { nextSundayISO, formatDateOnly } from "../../lib/format"
 import { getMyAvailability, setMyAvailability, type MyAvailability } from "../../lib/field-ops"
 
 /**
@@ -94,7 +94,7 @@ export default function PresentismoPage() {
               }
             }}
           >
-            <p className="mb-2 text-sm text-cream/70">¿Venís el domingo {formatDate(week)}?</p>
+            <p className="mb-2 text-sm text-cream/70">¿Venís el domingo {formatDateOnly(week)}?</p>
             <div className="mb-4 flex gap-3">
               <button
                 type="button"

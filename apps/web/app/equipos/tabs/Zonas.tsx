@@ -12,8 +12,18 @@ import {
   type ZoneItem,
 } from "../../../lib/field-ops"
 
+// Fase T (25/09/2026): weekStartDate/weekEndDate son fechas "de calendario"
+// (YYYY-MM-DD, medianoche UTC) — sin fijar timeZone acá, en Argentina
+// (UTC-3) se mostraban un día para atrás (mismo bug que Presentismo, ver
+// formatDateOnly en lib/format.ts). Esta función es local a este archivo
+// nada más, así que se corrige acá directo en vez de importar.
 function formatDate(d: string) {
-  return new Date(d).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })
+  return new Date(d).toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  })
 }
 
 /** Fase I — CRUD de Zone + asignación semanal de un equipo (ZoneAssignment). */

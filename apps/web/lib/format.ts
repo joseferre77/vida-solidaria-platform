@@ -38,6 +38,27 @@ export function formatDate(value: string | Date | null | undefined): string {
   return new Date(value).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })
 }
 
+/** Fase T (25/09/2026) — fecha "de calendario" (weekStartDate, weekEndDate,
+ * el domingo de Presentismo): a diferencia de formatDate, esto es para un
+ * valor que representa UN DÍA puntual, no un instante con hora (createdAt,
+ * etc.). Esos valores llegan como "YYYY-MM-DD" — medianoche UTC — y si se
+ * formatean con la zona horaria del navegador (lo que hace formatDate al
+ * no fijar timeZone), en Argentina (UTC-3) se corren un día para atrás:
+ * bug reportado por Josecito (Presentismo mostraba "26/09" cuando el
+ * selector de semana decía "27/09", el mismo domingo). Acá se fija
+ * timeZone: "UTC" a propósito para que el día mostrado sea siempre el que
+ * se guardó, sin importar el huso horario de quien lo mira.
+ */
+export function formatDateOnly(value: string | Date | null | undefined): string {
+  if (!value) return "—"
+  return new Date(value).toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  })
+}
+
 export function formatDateTime(value: string | Date | null | undefined): string {
   if (!value) return "—"
   return new Date(value).toLocaleString("es-AR", {

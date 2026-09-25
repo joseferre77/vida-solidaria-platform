@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { nextSundayISO, formatDate } from "../../../lib/format"
+import { nextSundayISO, formatDateOnly } from "../../../lib/format"
 import { confirmWeeklyAvailability, listWeeklyAvailability, type WeeklyAvailabilityItem } from "../../../lib/field-ops"
 
 /**
@@ -50,7 +50,7 @@ export function Presentismo() {
       </div>
 
       <p className="mb-4 text-xs text-cream/50">
-        Domingo {formatDate(week)}. Cada persona carga su intención desde su propia pantalla de Presentismo — acá
+        Domingo {formatDateOnly(week)}. Cada persona carga su intención desde su propia pantalla de Presentismo — acá
         coordinación confirma quién finalmente viene, y después arma los equipos en la pestaña "Equipos".
       </p>
 
