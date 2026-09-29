@@ -53,6 +53,7 @@ export const GLOBAL_ROLES = [
   "coordinacion_extraccion",
   "coordinador_relevamiento",
   "voluntario",
+  "solo_observacion",
 ] as const
 
 export type GlobalRoleSlug = (typeof GLOBAL_ROLES)[number]
@@ -67,6 +68,7 @@ export const ROLE_LABELS: Record<GlobalRoleSlug, string> = {
   coordinacion_extraccion: "Coordinación de Extracción",
   coordinador_relevamiento: "Coordinador de Relevamiento",
   voluntario: "Voluntario",
+  solo_observacion: "Solo Observación",
 }
 
 // rank: menor número = más alcance (se usa para "el rol de proyecto más
@@ -81,6 +83,8 @@ export const ROLE_RANK: Record<GlobalRoleSlug, number> = {
   coordinacion_extraccion: 4,
   coordinador_relevamiento: 5,
   voluntario: 6,
+  // el rank más alto (menos alcance): puede ver, no puede escribir nada
+  solo_observacion: 7,
 }
 
 /**
@@ -118,4 +122,20 @@ export const ROLE_PERMISSIONS: Record<Exclude<GlobalRoleSlug, "admin_general">, 
     "coordination.chat",
   ],
   voluntario: ["field_ops.read", "field_ops.write"],
+  // Solo Observación: acceso de solo lectura a todos los módulos, sin
+  // ningún permiso de escritura/borrado/administración. Ojo:
+  // `coordination.chat` hoy habilita LEER y ESCRIBIR el chat de
+  // coordinadores con el mismo slug (no hay variante de solo lectura
+  // todavía — ver coordination.routes.ts), así que este rol NO lo incluye:
+  // este usuario no ve el chat de coordinadores hasta que se separe ese
+  // permiso en read/write. Tampoco incluye `surveys.manage` (permite
+  // crear/editar encuestas, no es de solo lectura).
+  solo_observacion: [
+    "projects.read",
+    "cases.read",
+    "logistics.read",
+    "field_ops.read",
+    "finance.read",
+    "analytics.read",
+  ],
 }
