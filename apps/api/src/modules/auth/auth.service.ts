@@ -84,15 +84,31 @@ export async function revokeRefreshToken(raw: string) {
   })
 }
 
-/** Aplana roles + permisos de un usuario para embeber en el access token. */
+/**
+ * Aplana roles + permisos de un usuario para embeber en el access token.
+ *
+ * Fase U: además de lo que dan sus roles, un usuario puede tener ajustes
+ * puntuales (`UserPermissionOverride`) — un permiso de más que ningún rol
+ * suyo le da, o uno de menos que algún rol sí le daría. NO aplica a
+ * admin_general: ese sigue resolviendo a `["*"]` tal cual antes (ver nota
+ * en el modelo `UserPermissionOverride` del schema — restringir a un Admin
+ * General puntual implica sacarle ese rol, no un override).
+ */
 export function flattenRolesAndPermissions(
-  userRoles: { role: { slug: string; permissions: { permission: { slug: string } }[] } }[]
+  userRoles: { role: { slug: string; permissions: { permission: { slug: string } }[] } }[],
+  overrides: { permission: { slug: string }; granted: boolean }[] = []
 ) {
   const roles = userRoles.map((ur) => ur.role.slug)
   const isAdmin = roles.includes("admin_general")
-  const permissions = isAdmin
-    ? ["*"] // admin_general: acceso total, resuelto explícitamente en el middleware
-    : Array.from(new Set(userRoles.flatMap((ur) => ur.role.permissions.map((rp) => rp.permission.slug))))
+  if (isAdmin) {
+    return { roles, permissions: ["*"] } // acceso total, resuelto explícitamente en el middleware
+  }
 
-  return { roles, permissions }
+  const fromRoles = new Set(userRoles.flatMap((ur) => ur.role.permissions.map((rp) => rp.permission.slug)))
+  for (const o of overrides) {
+    if (o.granted) fromRoles.add(o.permission.slug)
+    else fromRoles.delete(o.permission.slug)
+  }
+
+  return { roles, permissions: Array.from(fromRoles) }
 }

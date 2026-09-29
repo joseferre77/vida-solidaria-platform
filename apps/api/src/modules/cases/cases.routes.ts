@@ -40,6 +40,7 @@ import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
 import { notify, usersWithPermission } from "../../lib/notify"
+import { logActivity } from "../../lib/audit"
 // Import cruzado a Proyectos para la auto-conversión de casos (bloque
 // post-Fase-K "Casos II") — mismo patrón ya usado por analytics.routes.ts
 // (que importa `listProjects` de este mismo service), no es la primera vez
@@ -211,22 +212,10 @@ async function nextCaseNumber() {
 }
 
 // ────────────────────────────────────────────────
-// Auditoría mínima (AuditLog) — pedido explícito de Josecito: "quien baja
-// información, quien modifica" en los casos, mientras la Auditoría
-// completa queda pospuesta ("continuamos después con armar una
-// Auditoría"). Mismo patrón que `logActivity` en projects.service.ts —
-// se duplica acá en vez de importarlo para no acoplar los dos módulos más
-// de lo necesario (el import cruzado de arriba ya es el mínimo indispensable
-// para la auto-conversión a Proyecto).
-async function logActivity(actorId: string, entityType: string, entityId: string, action: string, diff?: unknown) {
-  try {
-    await prisma.auditLog.create({
-      data: { userId: actorId, entityType, entityId, action, diff: diff === undefined ? undefined : (diff as never) },
-    })
-  } catch {
-    // La auditoría nunca debe tirar abajo la operación real que la generó.
-  }
-}
+// Auditoría (AuditLog) — Fase U centralizó `logActivity` en lib/audit.ts
+// (antes vivía duplicada acá) para poder extenderla también a Logística,
+// Operaciones de Campo y Administración de usuarios.
+// ────────────────────────────────────────────────
 
 const CASE_DETAIL_INCLUDE = {
   contactsHistory: { orderBy: { contactedAt: "desc" as const } },
@@ -736,6 +725,7 @@ export async function casesRoutes(app: FastifyInstance) {
         prisma.caseContactHistory.create({ data: { caseId: id, userId: author, ...body } }),
         prisma.case.findUniqueOrThrow({ where: { id } }),
       ])
+      await logActivity(author, "case", id, "contact_logged", body)
 
       // Aviso a todo el equipo asignado (menos a quien la cargó) de que hay
       // una entrada nueva en la bitácora — así no dependen de entrar a
@@ -764,6 +754,7 @@ export async function casesRoutes(app: FastifyInstance) {
       const { id } = request.params as { id: string }
       const body = locationSchema.parse(request.body)
       await prisma.caseLocation.create({ data: { caseId: id, recordedBy: request.user!.sub, ...body } })
+      await logActivity(request.user!.sub, "case", id, "location_added", body)
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return reply.code(201).send(await serializeCaseDetail(updated))
     },
@@ -776,6 +767,7 @@ export async function casesRoutes(app: FastifyInstance) {
       const { id } = request.params as { id: string }
       const body = photoSchema.parse(request.body)
       await prisma.casePhoto.create({ data: { caseId: id, uploadedBy: request.user!.sub, ...body } })
+      await logActivity(request.user!.sub, "case", id, "photo_added", body)
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return reply.code(201).send(await serializeCaseDetail(updated))
     },
@@ -785,6 +777,7 @@ export async function casesRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string }
     const body = needInputSchema.parse(request.body)
     await prisma.caseNeed.create({ data: { caseId: id, ...body } })
+    await logActivity(request.user!.sub, "case", id, "need_added", body)
     const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
     return reply.code(201).send(await serializeCaseDetail(updated))
   })
@@ -796,6 +789,7 @@ export async function casesRoutes(app: FastifyInstance) {
       const { id, needId } = request.params as { id: string; needId: string }
       const { resolved } = z.object({ resolved: z.boolean() }).parse(request.body)
       await prisma.caseNeed.update({ where: { id: needId }, data: { resolvedAt: resolved ? new Date() : null } })
+      await logActivity(request.user!.sub, "case", id, resolved ? "need_resolved" : "need_reopened", { needId })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },
@@ -805,6 +799,7 @@ export async function casesRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string }
     const body = skillInputSchema.parse(request.body)
     await prisma.caseSkill.create({ data: { caseId: id, ...body } })
+    await logActivity(request.user!.sub, "case", id, "skill_added", body)
     const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
     return reply.code(201).send(await serializeCaseDetail(updated))
   })
@@ -815,6 +810,7 @@ export async function casesRoutes(app: FastifyInstance) {
     async (request) => {
       const { id, skillId } = request.params as { id: string; skillId: string }
       await prisma.caseSkill.delete({ where: { id: skillId } })
+      await logActivity(request.user!.sub, "case", id, "skill_removed", { skillId })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },
@@ -849,6 +845,7 @@ export async function casesRoutes(app: FastifyInstance) {
             : undefined,
         },
       })
+      await logActivity(userId, "case", id, "member_added", { fullName: body.fullName })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return reply.code(201).send(await serializeCaseDetail(updated))
     },
@@ -861,6 +858,7 @@ export async function casesRoutes(app: FastifyInstance) {
       const { id, memberId } = request.params as { id: string; memberId: string }
       const body = updateMemberSchema.parse(request.body)
       await prisma.caseMember.update({ where: { id: memberId }, data: body })
+      await logActivity(request.user!.sub, "case", id, "member_updated", { memberId, ...body })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },
@@ -872,6 +870,7 @@ export async function casesRoutes(app: FastifyInstance) {
     async (request) => {
       const { id, memberId } = request.params as { id: string; memberId: string }
       await prisma.caseMember.delete({ where: { id: memberId } })
+      await logActivity(request.user!.sub, "case", id, "member_removed", { memberId })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },
@@ -884,6 +883,7 @@ export async function casesRoutes(app: FastifyInstance) {
       const { id, memberId } = request.params as { id: string; memberId: string }
       const body = needInputSchema.parse(request.body)
       await prisma.caseNeed.create({ data: { caseId: id, caseMemberId: memberId, ...body } })
+      await logActivity(request.user!.sub, "case", id, "member_need_added", { memberId, ...body })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return reply.code(201).send(await serializeCaseDetail(updated))
     },
@@ -896,6 +896,7 @@ export async function casesRoutes(app: FastifyInstance) {
       const { id, needId } = request.params as { id: string; memberId: string; needId: string }
       const { resolved } = z.object({ resolved: z.boolean() }).parse(request.body)
       await prisma.caseNeed.update({ where: { id: needId }, data: { resolvedAt: resolved ? new Date() : null } })
+      await logActivity(request.user!.sub, "case", id, resolved ? "member_need_resolved" : "member_need_reopened", { needId })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },
@@ -908,6 +909,7 @@ export async function casesRoutes(app: FastifyInstance) {
       const { id, memberId } = request.params as { id: string; memberId: string }
       const body = skillInputSchema.parse(request.body)
       await prisma.caseSkill.create({ data: { caseId: id, caseMemberId: memberId, ...body } })
+      await logActivity(request.user!.sub, "case", id, "member_skill_added", { memberId, ...body })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return reply.code(201).send(await serializeCaseDetail(updated))
     },
@@ -919,6 +921,7 @@ export async function casesRoutes(app: FastifyInstance) {
     async (request) => {
       const { id, skillId } = request.params as { id: string; memberId: string; skillId: string }
       await prisma.caseSkill.delete({ where: { id: skillId } })
+      await logActivity(request.user!.sub, "case", id, "member_skill_removed", { skillId })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },
@@ -933,6 +936,7 @@ export async function casesRoutes(app: FastifyInstance) {
       await prisma.casePhoto.create({
         data: { caseId: id, caseMemberId: memberId, uploadedBy: request.user!.sub, ...body },
       })
+      await logActivity(request.user!.sub, "case", id, "member_photo_added", { memberId, ...body })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return reply.code(201).send(await serializeCaseDetail(updated))
     },
@@ -944,6 +948,7 @@ export async function casesRoutes(app: FastifyInstance) {
     async (request) => {
       const { id, photoId } = request.params as { id: string; memberId: string; photoId: string }
       await prisma.casePhoto.delete({ where: { id: photoId } })
+      await logActivity(request.user!.sub, "case", id, "member_photo_removed", { photoId })
       const updated = await prisma.case.findUniqueOrThrow({ where: { id }, include: CASE_DETAIL_INCLUDE })
       return serializeCaseDetail(updated)
     },
@@ -959,6 +964,7 @@ export async function casesRoutes(app: FastifyInstance) {
       const body = assignmentSchema.parse(request.body)
       const caseRecord = await prisma.case.findUniqueOrThrow({ where: { id } })
       await prisma.caseAssignment.create({ data: { caseId: id, userId: body.userId, role: body.role } })
+      await logActivity(request.user!.sub, "case", id, "assignment_added", body)
 
       await notify([body.userId], {
         title: `Te asignaron al caso ${caseRecord.caseNumber} como ${CASE_ASSIGNMENT_ROLE_LABEL[body.role]}`,
@@ -990,6 +996,7 @@ export async function casesRoutes(app: FastifyInstance) {
       }
       const caseRecord = await prisma.case.findUniqueOrThrow({ where: { id } })
       await prisma.caseAssignment.update({ where: { id: assignmentId }, data: { unassignedAt: new Date() } })
+      await logActivity(request.user!.sub, "case", id, "assignment_removed", { assignmentId })
 
       await notify([assignment.userId], {
         title: `Te desasignaron del caso ${caseRecord.caseNumber}`,

@@ -37,6 +37,7 @@ import { notify, usersWithPermission, usersWithRoles } from "../../lib/notify"
 import { brandEmailWrapper, brandButton } from "../../lib/brand-email"
 import { env } from "../../config/env"
 import { signKitchenConfirmToken } from "../../lib/kitchen-confirm-token"
+import { logActivity } from "../../lib/audit"
 
 const STOCK_UNITS = ["kg", "litros", "unidades", "paquetes", "cajas"] as const
 
@@ -626,6 +627,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
       // el POST de movimientos.
       await notifyNewDonation(item, body.initialQuantity, null, request.user!.sub)
     }
+    await logActivity(request.user!.sub, "stock_item", item.id, "created", body)
     return reply.code(201).send(await serializeStockItem(item))
   })
 
@@ -638,6 +640,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
       icon: rest.icon === undefined ? undefined : rest.icon || null,
     }
     const item = await prisma.stockItem.update({ where: { id }, data: body, include: STOCK_ITEM_INCLUDE })
+    await logActivity(request.user!.sub, "stock_item", id, "updated", body)
     return serializeStockItem(item)
   })
 
@@ -647,6 +650,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { id } = request.params as { id: string }
       await prisma.stockItem.delete({ where: { id } })
+      await logActivity(request.user!.sub, "stock_item", id, "deleted")
       return reply.code(204).send()
     },
   )
@@ -769,7 +773,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: "Este insumo es reusable: se presta (custodia), no se mueve por stock" })
       }
       const qtyBefore = await currentQuantity(id)
-      await prisma.stockMovement.create({
+      const movement = await prisma.stockMovement.create({
         data: {
           stockItemId: id,
           type: body.type,
@@ -784,6 +788,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
       if (body.type === "ingreso") {
         await notifyNewDonation(item, body.quantity, body.holderUserId ?? null, request.user!.sub)
       }
+      await logActivity(request.user!.sub, "stock_movement", movement.id, body.type, { stockItemId: id, ...body })
       const updated = await prisma.stockItem.findUniqueOrThrow({ where: { id }, include: STOCK_ITEM_INCLUDE })
       return reply.code(201).send(await serializeStockItem(updated))
     },
@@ -800,7 +805,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
       if (!stockItem.isReusable) {
         return reply.code(400).send({ error: "Este insumo no es reusable, no aplica préstamo/custodia" })
       }
-      await prisma.stockCustody.create({
+      const custody = await prisma.stockCustody.create({
         data: {
           stockItemId: id,
           holderUserId: body.holderUserId,
@@ -809,6 +814,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
           checkedOutBy: request.user!.sub,
         },
       })
+      await logActivity(request.user!.sub, "stock_custody", custody.id, "created", { stockItemId: id, ...body })
       const item = await prisma.stockItem.findUniqueOrThrow({ where: { id }, include: STOCK_ITEM_INCLUDE })
       return reply.code(201).send(await serializeStockItem(item))
     },
@@ -824,6 +830,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         where: { id: custodyId },
         data: { returnedAt: new Date(), returnedNotes: body.returnedNotes || null },
       })
+      await logActivity(request.user!.sub, "stock_custody", custodyId, "returned", body)
       const item = await prisma.stockItem.findUniqueOrThrow({
         where: { id: custody.stockItemId },
         include: STOCK_ITEM_INCLUDE,
@@ -850,7 +857,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
       if (current.holderUserId === body.holderUserId) {
         return reply.code(400).send({ error: "Ya lo tiene esa persona" })
       }
-      await prisma.$transaction([
+      const [, newCustody] = await prisma.$transaction([
         prisma.stockCustody.update({
           where: { id: custodyId },
           data: { returnedAt: new Date(), returnedNotes: body.notes || "Traspaso directo a otra persona" },
@@ -866,6 +873,10 @@ export async function logisticsRoutes(app: FastifyInstance) {
           },
         }),
       ])
+      await logActivity(request.user!.sub, "stock_custody", newCustody.id, "transferred", {
+        fromCustodyId: custodyId,
+        ...body,
+      })
       const item = await prisma.stockItem.findUniqueOrThrow({
         where: { id: current.stockItemId },
         include: STOCK_ITEM_INCLUDE,
@@ -955,7 +966,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
       const code = await nextStockCode()
       item = await prisma.stockItem.create({ data: { code, name: body.newItemName, unit: body.unit, isReusable: false } })
     }
-    await prisma.stockMovement.create({
+    const movement = await prisma.stockMovement.create({
       data: {
         stockItemId: item.id,
         type: "ingreso",
@@ -966,6 +977,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
       },
     })
     await notifyNewDonation(item, body.quantity, request.user!.sub, request.user!.sub)
+    await logActivity(request.user!.sub, "stock_movement", movement.id, "ingreso", { stockItemId: item.id, ...body })
     return reply.code(201).send({ ok: true, stockItem: { id: item.id, name: item.name, unit: item.unit } })
   })
 
@@ -1023,6 +1035,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         },
       }),
     ])
+    await logActivity(request.user!.sub, "stock_movement", stockItemId, "transferred", { transferId, ...body })
     const updated = await prisma.stockItem.findUniqueOrThrow({ where: { id: stockItemId }, include: STOCK_ITEM_INCLUDE })
     return reply.code(201).send(await serializeStockItem(updated))
   })
@@ -1069,6 +1082,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         },
         include: BATCH_INCLUDE,
       })
+      await logActivity(request.user!.sub, "kitchen_batch", batch.id, "created", body)
       return reply.code(201).send(await serializeBatch(batch))
     },
   )
@@ -1084,6 +1098,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         data: { responsibleUserId },
         include: BATCH_INCLUDE,
       })
+      await logActivity(request.user!.sub, "kitchen_batch", id, "responsible_changed", { responsibleUserId })
       return serializeBatch(batch)
     },
   )
@@ -1102,6 +1117,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         },
         include: BATCH_INCLUDE,
       })
+      await logActivity(request.user!.sub, "kitchen_batch", id, "status_changed", { status })
       return serializeBatch(batch)
     },
   )
@@ -1152,6 +1168,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         }
       }
 
+      await logActivity(request.user!.sub, "kitchen_batch", id, "ingredient_assigned", body)
       const updatedBatch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
       return serializeBatch(updatedBatch)
     },
@@ -1182,6 +1199,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
           },
         })
       }
+      await logActivity(request.user!.sub, "kitchen_batch", id, "ingredient_removed", { stockItemId })
       const updatedBatch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
       return serializeBatch(updatedBatch)
     },
@@ -1220,6 +1238,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
           batchId: id,
         },
       })
+      await logActivity(request.user!.sub, "kitchen_batch", id, "equipment_added", body)
       const updatedBatch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
       return reply.code(201).send(await serializeBatch(updatedBatch))
     },
@@ -1242,6 +1261,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
           data: { returnedAt: new Date(), returnedNotes: "Quitado del kit" },
         })
       }
+      await logActivity(request.user!.sub, "kitchen_batch", id, "equipment_removed", { custodyId })
       const updatedBatch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
       return serializeBatch(updatedBatch)
     },
@@ -1266,6 +1286,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
         update: { taskLabel: body.taskLabel || null },
         create: { batchId: id, userId: body.userId, taskLabel: body.taskLabel || null },
       })
+      await logActivity(request.user!.sub, "kitchen_batch", id, "assignee_added", body)
       const batch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
       if (!existing) {
         const assignedUser = await prisma.user.findUnique({ where: { id: body.userId }, select: { name: true, email: true } })
@@ -1309,6 +1330,7 @@ export async function logisticsRoutes(app: FastifyInstance) {
     async (request) => {
       const { id, userId } = request.params as { id: string; userId: string }
       await prisma.kitchenBatchAssignee.delete({ where: { batchId_userId: { batchId: id, userId } } })
+      await logActivity(request.user!.sub, "kitchen_batch", id, "assignee_removed", { userId })
       const batch = await prisma.kitchenBatch.findUniqueOrThrow({ where: { id }, include: BATCH_INCLUDE })
       return serializeBatch(batch)
     },

@@ -18,8 +18,9 @@ import { Prisma } from "@prisma/client"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
 import { hashPassword } from "../auth/auth.service"
-import { GLOBAL_ROLES } from "../rbac/permissions"
+import { GLOBAL_ROLES, PERMISSIONS, PERMISSION_INFO } from "../rbac/permissions"
 import { sendEmail } from "../../lib/email"
+import { logActivity } from "../../lib/audit"
 
 const PASSWORD_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#%*"
 
@@ -69,6 +70,14 @@ const updateRolesSchema = z.object({
 
 const approveUserSchema = z.object({
   roleSlugs: z.array(roleSlugSchema).min(1, "Elegí al menos un rol"),
+})
+
+// Fase U — ajuste de un permiso puntual para un usuario, por encima de sus
+// roles. `granted: null` saca el ajuste (vuelve a lo que le dan sus roles).
+const setPermissionOverrideSchema = z.object({
+  permissionSlug: z.enum(PERMISSIONS),
+  granted: z.boolean().nullable(),
+  note: z.string().trim().max(300).nullable().optional(),
 })
 
 function serializeUser(user: {
@@ -207,6 +216,11 @@ export async function usersRoutes(app: FastifyInstance) {
       include: USER_WITH_ROLES_INCLUDE,
     })
 
+    await logActivity(request.user!.sub, "user", user.id, "created", {
+      email: user.email,
+      roleSlugs: body.roleSlugs,
+    })
+
     return reply.code(201).send({
       user: serializeUser(user),
       // Solo se devuelve cuando el admin no puso una contraseña propia — es
@@ -234,6 +248,7 @@ export async function usersRoutes(app: FastifyInstance) {
       },
       include: USER_WITH_ROLES_INCLUDE,
     })
+    await logActivity(request.user!.sub, "user", user.id, "updated", rest)
     return serializeUser(user)
   })
 
@@ -256,6 +271,7 @@ export async function usersRoutes(app: FastifyInstance) {
       const generatedPassword = generateSecurePassword()
       const passwordHash = await hashPassword(generatedPassword)
       await prisma.user.update({ where: { id }, data: { passwordHash } })
+      await logActivity(request.user!.sub, "user", id, "password_regenerated")
 
       return reply.send({ email: target.email, generatedPassword })
     },
@@ -289,6 +305,7 @@ export async function usersRoutes(app: FastifyInstance) {
       ])
 
       const updated = await prisma.user.findUniqueOrThrow({ where: { id }, include: USER_WITH_ROLES_INCLUDE })
+      await logActivity(request.user!.sub, "user", id, "roles_changed", { roleSlugs: body.roleSlugs })
       return serializeUser(updated)
     },
   )
@@ -342,6 +359,8 @@ export async function usersRoutes(app: FastifyInstance) {
         ),
       })
 
+      await logActivity(request.user!.sub, "user", id, "approved", { roleSlugs: body.roleSlugs })
+
       return reply.send({
         user: serializeUser(user),
         // Igual que en el alta manual: se devuelve una única vez para que
@@ -372,6 +391,7 @@ export async function usersRoutes(app: FastifyInstance) {
         data: { status: "rejected" },
         include: USER_WITH_ROLES_INCLUDE,
       })
+      await logActivity(request.user!.sub, "user", id, "rejected")
       return serializeUser(user)
     },
   )
@@ -399,7 +419,8 @@ export async function usersRoutes(app: FastifyInstance) {
     }
 
     try {
-      await prisma.user.delete({ where: { id } })
+      const deleted = await prisma.user.delete({ where: { id } })
+      await logActivity(request.user!.sub, "user", id, "deleted", { email: deleted.email, name: deleted.name })
       return reply.code(204).send()
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError) {
@@ -416,4 +437,151 @@ export async function usersRoutes(app: FastifyInstance) {
       throw err
     }
   })
+
+  // ────────────────────────────────────────────────
+  // Fase U — perfil completo de usuario: matriz de permisos por módulo
+  // (roles + ajustes puntuales), historial de sesiones y actividad
+  // reciente. Todo gateado por `users.manage`, igual que el resto del ABM.
+  // ────────────────────────────────────────────────
+
+  // ── Matriz de permisos resuelta: qué le da cada rol + qué ajustes tiene
+  // encima, permiso por permiso. Admin General siempre sale con acceso
+  // total (el wildcard "*" se resuelve antes de llegar a la DB de
+  // overrides — ver flattenRolesAndPermissions en auth.service.ts). ──
+  app.get(
+    "/users/:id/permissions",
+    { preHandler: [requireAuth, requirePermission("users.manage")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const target = await prisma.user.findUnique({
+        where: { id },
+        include: {
+          roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
+          permissionOverrides: { include: { permission: true } },
+        },
+      })
+      if (!target) return reply.code(404).send({ error: "Usuario no encontrado" })
+
+      const isAdminGeneral = target.roles.some((ur) => ur.role.slug === "admin_general")
+      const fromRoleSet = new Set(target.roles.flatMap((ur) => ur.role.permissions.map((rp) => rp.permission.slug)))
+      const overrideBySlug = new Map(target.permissionOverrides.map((o) => [o.permission.slug, o]))
+
+      const permissions = PERMISSIONS.map((slug) => {
+        const fromRole = isAdminGeneral || fromRoleSet.has(slug)
+        const override = overrideBySlug.get(slug)
+        const effective = isAdminGeneral ? true : override ? override.granted : fromRole
+        return {
+          slug,
+          label: PERMISSION_INFO[slug].label,
+          module: PERMISSION_INFO[slug].module,
+          fromRole,
+          override: override
+            ? { granted: override.granted, note: override.note, createdAt: override.createdAt }
+            : null,
+          effective,
+        }
+      })
+
+      return {
+        isAdminGeneral,
+        roles: target.roles
+          .map((ur) => ur.role)
+          .sort((a, b) => a.rank - b.rank)
+          .map((r) => ({ slug: r.slug, label: r.label })),
+        permissions,
+      }
+    },
+  )
+
+  // ── Ajustar (o quitar) un permiso puntual para un usuario. ──
+  app.patch(
+    "/users/:id/permissions",
+    { preHandler: [requireAuth, requirePermission("users.manage")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const body = setPermissionOverrideSchema.parse(request.body)
+
+      const target = await prisma.user.findUnique({ where: { id }, include: USER_WITH_ROLES_INCLUDE })
+      if (!target) return reply.code(404).send({ error: "Usuario no encontrado" })
+
+      if (target.roles.some((ur) => ur.role.slug === "admin_general")) {
+        return reply.code(400).send({
+          error: "Admin General ya tiene acceso total a todo — para restringirlo primero hay que sacarle ese rol.",
+        })
+      }
+
+      const permission = await prisma.permission.findUnique({ where: { slug: body.permissionSlug } })
+      if (!permission) return reply.code(400).send({ error: "Permiso inválido" })
+
+      if (body.granted === null) {
+        await prisma.userPermissionOverride.deleteMany({ where: { userId: id, permissionId: permission.id } })
+        await logActivity(request.user!.sub, "user_permission", id, "override_cleared", {
+          permissionSlug: body.permissionSlug,
+        })
+      } else {
+        await prisma.userPermissionOverride.upsert({
+          where: { userId_permissionId: { userId: id, permissionId: permission.id } },
+          update: { granted: body.granted, note: body.note ?? null, createdBy: request.user!.sub },
+          create: {
+            userId: id,
+            permissionId: permission.id,
+            granted: body.granted,
+            note: body.note ?? null,
+            createdBy: request.user!.sub,
+          },
+        })
+        await logActivity(request.user!.sub, "user_permission", id, "override_set", {
+          permissionSlug: body.permissionSlug,
+          granted: body.granted,
+          note: body.note ?? null,
+        })
+      }
+
+      return reply.send({ ok: true })
+    },
+  )
+
+  // ── Historial de sesiones (login/logout) — de RefreshToken, que ya
+  // registra userAgent/ip/fechas de cada sesión emitida desde siempre. ──
+  app.get(
+    "/users/:id/sessions",
+    { preHandler: [requireAuth, requirePermission("users.manage")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const target = await prisma.user.findUnique({ where: { id }, select: { id: true } })
+      if (!target) return reply.code(404).send({ error: "Usuario no encontrado" })
+
+      const sessions = await prisma.refreshToken.findMany({
+        where: { userId: id },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: { id: true, userAgent: true, ip: true, createdAt: true, expiresAt: true, revokedAt: true },
+      })
+
+      const now = new Date()
+      return sessions.map((s) => ({
+        ...s,
+        // "activa" = ni fue revocada a mano (logout) ni venció todavía.
+        active: !s.revokedAt && s.expiresAt > now,
+      }))
+    },
+  )
+
+  // ── Actividad reciente de este usuario en cualquier módulo (AuditLog). ──
+  app.get(
+    "/users/:id/activity",
+    { preHandler: [requireAuth, requirePermission("users.manage")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const target = await prisma.user.findUnique({ where: { id }, select: { id: true } })
+      if (!target) return reply.code(404).send({ error: "Usuario no encontrado" })
+
+      const entries = await prisma.auditLog.findMany({
+        where: { userId: id },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      })
+      return entries
+    },
+  )
 }

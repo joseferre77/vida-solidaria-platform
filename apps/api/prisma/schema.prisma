@@ -79,6 +79,7 @@ model User {
   projectNotes      ProjectNote[]
   coordinatorMessages CoordinatorMessage[]
   pushSubscriptions   PushSubscription[]
+  permissionOverrides UserPermissionOverride[]
 
   @@map("users")
 }
@@ -139,7 +140,8 @@ model Permission {
   slug  String @unique // cases.write, finance.read, projects.admin, ...
   label String
 
-  roles RolePermission[]
+  roles     RolePermission[]
+  overrides UserPermissionOverride[]
 
   @@map("permissions")
 }
@@ -152,6 +154,28 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
+}
+
+// Fase U — ajustes de permisos por usuario, por encima de sus roles.
+// `granted: true` = le da ese permiso aunque ninguno de sus roles lo tenga.
+// `granted: false` = se lo saca aunque alguno de sus roles sí lo tenga.
+// No aplica a admin_general (acceso total resuelto como wildcard "*" en el
+// middleware, antes de llegar a esta tabla — ver flattenRolesAndPermissions
+// en auth.service.ts). Para restringir a alguien que hoy es Admin General,
+// hay que sacarle ese rol y darle uno más específico + overrides acá.
+model UserPermissionOverride {
+  id           String     @id @default(uuid())
+  userId       String     @map("user_id")
+  permissionId String     @map("permission_id")
+  granted      Boolean
+  note         String? // motivo opcional, visible en el perfil del usuario
+  createdAt    DateTime   @default(now()) @map("created_at")
+  createdBy    String?    @map("created_by") // id del admin que hizo el cambio (auditoría)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionId])
+  @@map("user_permission_overrides")
 }
 
 model RefreshToken {
@@ -181,6 +205,9 @@ model AuditLog {
   user User? @relation("audit_actor", fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
+  // Fase U: "actividad reciente" en el perfil de un usuario — listar sus
+  // propias acciones más recientes en cualquier módulo, ordenadas por fecha.
+  @@index([userId, createdAt])
   @@map("audit_log")
 }
 

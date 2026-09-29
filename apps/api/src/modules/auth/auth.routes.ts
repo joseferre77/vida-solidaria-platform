@@ -31,6 +31,7 @@ async function loadUserWithRoles(userId: string) {
     where: { id: userId },
     include: {
       roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
+      permissionOverrides: { include: { permission: true } },
     },
   })
 }
@@ -39,7 +40,7 @@ async function issueSessionCookies(reply: any, userId: string, meta: { userAgent
   const user = await loadUserWithRoles(userId)
   if (!user) throw new Error("Usuario no encontrado al emitir sesión")
 
-  const { roles, permissions } = flattenRolesAndPermissions(user.roles as any)
+  const { roles, permissions } = flattenRolesAndPermissions(user.roles as any, user.permissionOverrides as any)
   const accessToken = signAccessToken({ sub: user.id, roles, permissions })
   const { raw: refreshToken, expiresAt } = await issueRefreshToken(user.id, meta)
 
@@ -108,7 +109,11 @@ export async function authRoutes(app: FastifyInstance) {
     })
     if (!result) return reply.code(401).send({ error: "Sesión inválida o expirada" })
 
-    const { roles, permissions } = flattenRolesAndPermissions(result.user.roles as any)
+    const overrides = await prisma.userPermissionOverride.findMany({
+      where: { userId: result.user.id },
+      include: { permission: true },
+    })
+    const { roles, permissions } = flattenRolesAndPermissions(result.user.roles as any, overrides as any)
     const accessToken = signAccessToken({ sub: result.user.id, roles, permissions })
 
     reply.setCookie("access_token", accessToken, { ...COOKIE_OPTS, maxAge: 2 * 60 * 60 })
@@ -132,7 +137,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get("/auth/me", { preHandler: requireAuth }, async (request, reply) => {
     const user = await loadUserWithRoles(request.user!.sub)
     if (!user) return reply.code(404).send({ error: "Usuario no encontrado" })
-    const { roles, permissions } = flattenRolesAndPermissions(user.roles as any)
+    const { roles, permissions } = flattenRolesAndPermissions(user.roles as any, user.permissionOverrides as any)
     return reply.send({
       id: user.id,
       name: user.name,

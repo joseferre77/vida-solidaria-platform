@@ -43,6 +43,29 @@ export const PERMISSIONS = [
 
 export type PermissionSlug = (typeof PERMISSIONS)[number]
 
+// Fase U: nombres legibles + módulo dueño de cada permiso — para el ABM de
+// permisos por usuario (matriz on/off en el perfil). El `label` de
+// `Permission` en la DB sigue siendo el slug tal cual (así lo siembra
+// seed.ts desde siempre); esto es solo para la UI, no toca la DB.
+export const PERMISSION_INFO: Record<PermissionSlug, { label: string; module: string }> = {
+  "users.manage": { label: "Gestionar usuarios y roles", module: "Administración" },
+  "roles.manage": { label: "Administrar roles del sistema", module: "Administración" },
+  "projects.read": { label: "Ver proyectos", module: "Proyectos" },
+  "projects.write": { label: "Editar proyectos y tareas", module: "Proyectos" },
+  "projects.admin": { label: "Administrar proyectos (config, miembros)", module: "Proyectos" },
+  "cases.read": { label: "Ver casos", module: "Casos" },
+  "cases.write": { label: "Crear y editar casos", module: "Casos" },
+  "logistics.read": { label: "Ver stock y cocina", module: "Logística" },
+  "logistics.write": { label: "Cargar movimientos de stock y cocina", module: "Logística" },
+  "field_ops.read": { label: "Ver equipos, zonas y check-ins", module: "Operaciones de campo" },
+  "field_ops.write": { label: "Cargar check-ins y asignaciones de campo", module: "Operaciones de campo" },
+  "finance.read": { label: "Ver finanzas y donaciones", module: "Finanzas" },
+  "finance.write": { label: "Cargar movimientos financieros", module: "Finanzas" },
+  "surveys.manage": { label: "Crear y administrar encuestas", module: "Encuestas" },
+  "analytics.read": { label: "Ver analítica", module: "Analítica" },
+  "coordination.chat": { label: "Leer y escribir en el chat de coordinadores", module: "Chat" },
+}
+
 export const GLOBAL_ROLES = [
   "admin_general",
   "direccion_general",

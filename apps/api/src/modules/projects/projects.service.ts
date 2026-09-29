@@ -19,6 +19,7 @@
  * que pide CLAUDE.md, sin pretender ser un historial de valores previos.
  */
 import { prisma } from "../../lib/prisma"
+import { logActivity } from "../../lib/audit"
 import type {
   CustomFieldEntity,
   CustomFieldType,
@@ -39,23 +40,9 @@ export class BusinessRuleError extends Error {}
 
 // ────────────────────────────────────────────────
 // Auditoría (AuditLog) — trazabilidad de quién hizo qué
+// Fase U: `logActivity` se centralizó en lib/audit.ts para reusarla en
+// Logística, Operaciones de Campo y Administración — ver ese archivo.
 // ────────────────────────────────────────────────
-
-async function logActivity(
-  actorId: string,
-  entityType: string,
-  entityId: string,
-  action: string,
-  diff?: unknown,
-) {
-  try {
-    await prisma.auditLog.create({
-      data: { userId: actorId, entityType, entityId, action, diff: diff === undefined ? undefined : (diff as never) },
-    })
-  } catch {
-    // La auditoría nunca debe tirar abajo la operación real que la generó.
-  }
-}
 
 // ────────────────────────────────────────────────
 // Contador atómico → código de proyecto (PROY-0001, PROY-0002, ...)

@@ -36,6 +36,7 @@ import type { FastifyInstance } from "fastify"
 import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
+import { logActivity } from "../../lib/audit"
 
 const teamSchema = z.object({
   name: z.string().min(2, "El nombre es obligatorio"),
@@ -140,6 +141,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
     const team = await prisma.fieldTeam.create({
       data: { name: body.name, vehicleLabel: body.vehicleLabel || null, coordinatorUserId: body.coordinatorUserId || null },
     })
+    await logActivity(request.user!.sub, "field_team", team.id, "created", body)
     return reply.code(201).send({ ...team, coordinator: null, members: [] })
   })
 
@@ -149,7 +151,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
     async (request) => {
       const { id } = request.params as { id: string }
       const body = teamSchema.partial().parse(request.body)
-      return prisma.fieldTeam.update({
+      const team = await prisma.fieldTeam.update({
         where: { id },
         data: {
           ...body,
@@ -157,6 +159,8 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
           coordinatorUserId: body.coordinatorUserId === undefined ? undefined : body.coordinatorUserId || null,
         },
       })
+      await logActivity(request.user!.sub, "field_team", id, "updated", body)
+      return team
     },
   )
 
@@ -166,6 +170,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { id } = request.params as { id: string }
       await prisma.fieldTeam.delete({ where: { id } })
+      await logActivity(request.user!.sub, "field_team", id, "deleted")
       return reply.code(204).send()
     },
   )
@@ -182,6 +187,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
         update: { functions: functions ?? undefined },
         create: { teamId: id, userId, weekStartDate: weekStart, functions: functions ?? [] },
       })
+      await logActivity(request.user!.sub, "field_team", id, "member_added", { userId, weekStartDate, functions })
       // Devuelve solo los integrantes de ESA semana (no todo el historial
       // del equipo) — es lo que necesita la pantalla de armado semanal.
       const members = await prisma.fieldTeamMember.findMany({ where: { teamId: id, weekStartDate: weekStart } })
@@ -206,6 +212,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
       await prisma.fieldTeamMember.delete({
         where: { teamId_userId_weekStartDate: { teamId: id, userId, weekStartDate: new Date(weekStartDate) } },
       })
+      await logActivity(request.user!.sub, "field_team", id, "member_removed", { userId, weekStartDate })
       return reply.code(204).send()
     },
   )
@@ -229,7 +236,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
     // Upsert por (userId, weekStartDate): si ya había cargado intención
     // para este domingo, la actualiza en vez de duplicar. `confirmedPresent`
     // nunca se toca acá — es exclusivo de coordinación (ver abajo).
-    return prisma.weeklyAvailability.upsert({
+    const availability = await prisma.weeklyAvailability.upsert({
       where: { userId_weekStartDate: { userId: request.user!.sub, weekStartDate: weekStart } },
       update: { willAttend: body.willAttend, reason: body.willAttend ? null : body.reason || null },
       create: {
@@ -239,6 +246,8 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
         reason: body.willAttend ? null : body.reason || null,
       },
     })
+    await logActivity(request.user!.sub, "weekly_availability", availability.id, "updated", body)
+    return availability
   })
 
   app.get(
@@ -270,7 +279,12 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
       const body = confirmAvailabilitySchema.parse(request.body)
       const existing = await prisma.weeklyAvailability.findUnique({ where: { id } })
       if (!existing) return reply.code(404).send({ error: "Registro no encontrado" })
-      return prisma.weeklyAvailability.update({ where: { id }, data: { confirmedPresent: body.confirmedPresent } })
+      const updated = await prisma.weeklyAvailability.update({
+        where: { id },
+        data: { confirmedPresent: body.confirmedPresent },
+      })
+      await logActivity(request.user!.sub, "weekly_availability", id, "confirmed", body)
+      return updated
     },
   )
 
@@ -296,13 +310,16 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
   app.post("/zones", { preHandler: [requireAuth, requirePermission("field_ops.write")] }, async (request, reply) => {
     const body = zoneSchema.parse(request.body)
     const zone = await prisma.zone.create({ data: body })
+    await logActivity(request.user!.sub, "zone", zone.id, "created", body)
     return reply.code(201).send({ ...zone, assignments: [] })
   })
 
   app.patch("/zones/:id", { preHandler: [requireAuth, requirePermission("field_ops.write")] }, async (request) => {
     const { id } = request.params as { id: string }
     const body = zoneSchema.partial().parse(request.body)
-    return prisma.zone.update({ where: { id }, data: body })
+    const zone = await prisma.zone.update({ where: { id }, data: body })
+    await logActivity(request.user!.sub, "zone", id, "updated", body)
+    return zone
   })
 
   app.delete(
@@ -311,6 +328,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { id } = request.params as { id: string }
       await prisma.zone.delete({ where: { id } })
+      await logActivity(request.user!.sub, "zone", id, "deleted")
       return reply.code(204).send()
     },
   )
@@ -329,6 +347,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
         },
         include: { team: { select: { id: true, name: true } } },
       })
+      await logActivity(request.user!.sub, "zone_assignment", assignment.id, "created", body)
       return reply.code(201).send({
         id: assignment.id,
         teamId: assignment.teamId,
@@ -345,6 +364,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { id } = request.params as { id: string }
       await prisma.zoneAssignment.delete({ where: { id } })
+      await logActivity(request.user!.sub, "zone_assignment", id, "deleted")
       return reply.code(204).send()
     },
   )
@@ -397,6 +417,7 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
         deliveries: true,
       },
     })
+    await logActivity(request.user!.sub, "checkin", checkin.id, "created", body)
     const users = await userMapFor([checkin.userId])
     return reply.code(201).send({
       id: checkin.id,
