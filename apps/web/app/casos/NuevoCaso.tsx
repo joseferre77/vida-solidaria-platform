@@ -103,6 +103,13 @@ export function NuevoCaso({
   // relevamiento. Se recaptura en resetAll() al empezar un caso nuevo.
   const [surveyStartedAt, setSurveyStartedAt] = useState(() => new Date().toISOString())
 
+  // Fase W — clave de reintento (ver cases.routes.ts / schema.prisma):
+  // generada una sola vez al abrir el formulario, se reutiliza si falla el
+  // guardado y se vuelve a tocar "Guardar" para ESTE mismo caso — así el
+  // backend reconoce que es un reintento y no lo duplica. Se regenera en
+  // resetAll() porque ahí sí es, a propósito, un caso distinto.
+  const [submissionId, setSubmissionId] = useState(() => crypto.randomUUID())
+
   // Paso "basicos" (referente del grupo si es pareja/grupo familiar)
   const [caseType, setCaseType] = useState<CaseType>("individual")
   const [fullName, setFullName] = useState("")
@@ -293,6 +300,7 @@ export function NuevoCaso({
         photoUrls: photoUrls.length ? photoUrls : undefined,
         members: memberInputs.length ? memberInputs : undefined,
         surveyStartedAt,
+        clientSubmissionId: submissionId,
       })
       setDone(result.caseNumber)
     } catch (err: any) {
@@ -307,6 +315,7 @@ export function NuevoCaso({
     setDedupQuery("")
     setDedupResults([])
     setSurveyStartedAt(new Date().toISOString())
+    setSubmissionId(crypto.randomUUID())
     setCaseType("individual")
     setFullName("")
     setAlias("")

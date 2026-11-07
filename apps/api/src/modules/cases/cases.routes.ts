@@ -37,6 +37,7 @@
  */
 import type { FastifyInstance } from "fastify"
 import { z } from "zod"
+import { Prisma } from "@prisma/client"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
 import { notify, usersWithPermission } from "../../lib/notify"
@@ -144,6 +145,11 @@ const createCaseSchema = z.object({
   // Solo tiene sentido con caseType "pareja" / "grupo_familiar" — el resto
   // del grupo aparte del referente cargado arriba.
   members: z.array(memberInputSchema).optional(),
+  // Fase W — ver comentario en el modelo Case del schema: clave que el
+  // frontend genera una vez por intento de carga, para que un reintento
+  // (por sesión vencida o por el voluntario tocando "Guardar" de nuevo
+  // tras un error de red) devuelva el caso ya creado en vez de duplicarlo.
+  clientSubmissionId: z.string().uuid().optional(),
 })
 
 const updateCaseSchema = z.object({
@@ -507,6 +513,23 @@ export async function casesRoutes(app: FastifyInstance) {
   app.post("/cases", { preHandler: [requireAuth, requirePermission("cases.write")] }, async (request, reply) => {
     const body = createCaseSchema.parse(request.body)
     const userId = request.user!.sub
+
+    // Fase W — guard de reintento: si este mismo envío (misma clave, mismo
+    // usuario) ya generó un caso, no se crea uno nuevo — se devuelve el que
+    // ya existe. Esto es lo que evita el duplicado cuando la respuesta del
+    // primer POST se pierde en el camino (mala señal en la calle) y el
+    // cliente reintenta automáticamente o el voluntario vuelve a tocar
+    // "Guardar" al ver el error.
+    if (body.clientSubmissionId) {
+      const existing = await prisma.case.findFirst({
+        where: { clientSubmissionId: body.clientSubmissionId, createdBy: userId },
+        include: CASE_DETAIL_INCLUDE,
+      })
+      if (existing) {
+        return reply.code(200).send(await serializeCaseDetail(existing))
+      }
+    }
+
     const caseNumber = await nextCaseNumber()
 
     // Los integrantes adicionales (pareja/grupo familiar) necesitan el id
@@ -514,63 +537,88 @@ export async function casesRoutes(app: FastifyInstance) {
     // habilidades (CaseNeed/CaseSkill requieren caseId además de
     // caseMemberId) — por eso el caso se crea primero y los integrantes
     // se agregan después, todo dentro de la misma transacción.
-    const created = await prisma.$transaction(async (tx) => {
-      const caseRecord = await tx.case.create({
-        data: {
-          caseNumber,
-          fullName: body.fullName,
-          alias: body.alias,
-          approxAge: body.approxAge,
-          caseType: body.caseType,
-          dni: body.dni,
-          sex: body.sex,
-          phone: body.phone,
-          healthStatus: body.healthStatus,
-          currentSleepSpot: body.currentSleepSpot,
-          dayZone: body.dayZone,
-          stayType: body.stayType,
-          wantsToWork: body.wantsToWork,
-          workAptitude: body.workAptitude,
-          legalSituation: body.legalSituation,
-          substanceUse: body.substanceUse,
-          mainPhotoUrl: body.mainPhotoUrl,
-          surveyStartedAt: body.surveyStartedAt ? new Date(body.surveyStartedAt) : undefined,
-          createdBy: userId,
-          locations: { create: { lat: body.location.lat, lng: body.location.lng, recordedBy: userId } },
-          needs: body.needs?.length ? { create: body.needs } : undefined,
-          skills: body.skills?.length ? { create: body.skills } : undefined,
-          photos: body.photoUrls?.length
-            ? { create: body.photoUrls.map((url) => ({ url, uploadedBy: userId })) }
-            : undefined,
-          statusHistory: { create: { toStatus: "activo", changedBy: userId } },
-        },
-      })
-
-      for (const m of body.members ?? []) {
-        await tx.caseMember.create({
+    let created
+    try {
+      created = await prisma.$transaction(async (tx) => {
+        const caseRecord = await tx.case.create({
           data: {
-            caseId: caseRecord.id,
-            fullName: m.fullName,
-            alias: m.alias,
-            approxAge: m.approxAge,
-            dni: m.dni,
-            sex: m.sex,
-            healthStatus: m.healthStatus,
-            wantsToWork: m.wantsToWork,
-            workAptitude: m.workAptitude,
-            legalSituation: m.legalSituation,
-            substanceUse: m.substanceUse,
-            needs: m.needs?.length ? { create: m.needs.map((n) => ({ ...n, caseId: caseRecord.id })) } : undefined,
-            skills: m.skills?.length ? { create: m.skills.map((s) => ({ ...s, caseId: caseRecord.id })) } : undefined,
-            photos: m.photoUrls?.length
-              ? { create: m.photoUrls.map((url) => ({ url, uploadedBy: userId, caseId: caseRecord.id })) }
+            caseNumber,
+            fullName: body.fullName,
+            alias: body.alias,
+            approxAge: body.approxAge,
+            caseType: body.caseType,
+            dni: body.dni,
+            sex: body.sex,
+            phone: body.phone,
+            healthStatus: body.healthStatus,
+            currentSleepSpot: body.currentSleepSpot,
+            dayZone: body.dayZone,
+            stayType: body.stayType,
+            wantsToWork: body.wantsToWork,
+            workAptitude: body.workAptitude,
+            legalSituation: body.legalSituation,
+            substanceUse: body.substanceUse,
+            mainPhotoUrl: body.mainPhotoUrl,
+            surveyStartedAt: body.surveyStartedAt ? new Date(body.surveyStartedAt) : undefined,
+            clientSubmissionId: body.clientSubmissionId,
+            createdBy: userId,
+            locations: { create: { lat: body.location.lat, lng: body.location.lng, recordedBy: userId } },
+            needs: body.needs?.length ? { create: body.needs } : undefined,
+            skills: body.skills?.length ? { create: body.skills } : undefined,
+            photos: body.photoUrls?.length
+              ? { create: body.photoUrls.map((url) => ({ url, uploadedBy: userId })) }
               : undefined,
+            statusHistory: { create: { toStatus: "activo", changedBy: userId } },
           },
         })
-      }
 
-      return tx.case.findUniqueOrThrow({ where: { id: caseRecord.id }, include: CASE_DETAIL_INCLUDE })
-    })
+        for (const m of body.members ?? []) {
+          await tx.caseMember.create({
+            data: {
+              caseId: caseRecord.id,
+              fullName: m.fullName,
+              alias: m.alias,
+              approxAge: m.approxAge,
+              dni: m.dni,
+              sex: m.sex,
+              healthStatus: m.healthStatus,
+              wantsToWork: m.wantsToWork,
+              workAptitude: m.workAptitude,
+              legalSituation: m.legalSituation,
+              substanceUse: m.substanceUse,
+              needs: m.needs?.length ? { create: m.needs.map((n) => ({ ...n, caseId: caseRecord.id })) } : undefined,
+              skills: m.skills?.length ? { create: m.skills.map((s) => ({ ...s, caseId: caseRecord.id })) } : undefined,
+              photos: m.photoUrls?.length
+                ? { create: m.photoUrls.map((url) => ({ url, uploadedBy: userId, caseId: caseRecord.id })) }
+                : undefined,
+            },
+          })
+        }
+
+        return tx.case.findUniqueOrThrow({ where: { id: caseRecord.id }, include: CASE_DETAIL_INCLUDE })
+      })
+    } catch (err) {
+      // Carrera entre dos envíos casi simultáneos con la misma clave (ej.
+      // doble toque en "Guardar" antes de que el primero termine) — el
+      // chequeo de arriba no la agarra porque los dos llegan a pasar esa
+      // lectura antes de que cualquiera termine de escribir. El segundo
+      // pierde la carrera a nivel de base (unique constraint) en vez de
+      // crear un duplicado: se devuelve el caso que sí se creó.
+      if (
+        body.clientSubmissionId &&
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
+        const existing = await prisma.case.findFirst({
+          where: { clientSubmissionId: body.clientSubmissionId, createdBy: userId },
+          include: CASE_DETAIL_INCLUDE,
+        })
+        if (existing) {
+          return reply.code(200).send(await serializeCaseDetail(existing))
+        }
+      }
+      throw err
+    }
     await logActivity(userId, "case", created.id, "created", { caseNumber, fullName: body.fullName })
 
     const notifyIds = (await usersWithPermission("cases.read")).map((u) => u.id).filter((id) => id !== userId)

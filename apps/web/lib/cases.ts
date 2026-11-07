@@ -328,6 +328,10 @@ export interface CreateCaseInput {
   // Fase K bloque E: timestamp que captura el frontend al abrir el
   // formulario, para medir el "tiempo de carga" (createdAt - surveyStartedAt).
   surveyStartedAt?: string
+  // Fase W -- ver comentario en el modelo Case del backend: clave que el
+  // frontend genera una vez por intento de carga, para que un reintento
+  // (sesion vencida / error de red) no duplique el caso.
+  clientSubmissionId?: string
 }
 
 export interface CreateCaseMemberInput {

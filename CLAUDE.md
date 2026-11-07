@@ -183,8 +183,53 @@ tocar código de cualquiera de estos bloques.
 - Cada módulo se entrega como milestone independiente (ZIP + changelog acá),
   nunca todo junto.
 
+### ⚠️ Riesgo conocido: git no siempre refleja lo desplegado
+
+El último commit real en `main` es "Fase U (backend)" — Fase W y Fase X se
+hicieron directo sobre el working tree de este contenedor (o sincronizando
+archivos sueltos al servidor por SSH) y nunca se pushearon. Si una sesión
+nueva clona el repo fresco, **puede faltarle código que ya está vivo en
+producción** (pasó con `Usuarios.tsx`: la UI de pestañas de
+permisos/sesiones/actividad del perfil de usuario — construida y
+desplegada en una sesión anterior — no está ni commiteada ni en el
+working tree de este clon). Antes de tocar un archivo del frontend/backend
+en una sesión nueva, conviene traer la versión real desde el servidor
+(SSH) si hay sospecha de que diverge del repo, en vez de asumir que el
+clon está al día. Esto no se resuelve solo documentándolo — en algún
+momento conviene pushear el estado real a `main` (requiere decidir con
+Josecito si se hace ahora o se sigue priorizando velocidad de deploy).
+
 ## Historial de milestones
 
+- **Fase X (07/11/2026)**: Mapa de voluntarios en `/equipos` (pestaña
+  "Mapa", permiso `field_ops.*`). `User.lat/lng/geocodedAt` nuevos +
+  geocodificación gratuita por lote vía Nominatim/OSM
+  (`apps/api/src/lib/geocoding.ts`, 1 req/seg, botón manual en la UI).
+  `OperationalPoint` (modelo + CRUD): puntos de operación de la ONG con
+  categoría abierta (acopio de ropa, cocina, recepción de comida,
+  distribución de ropa, feria física, punto de encuentro, retiro de ropa,
+  otro) — pueden repetirse por categoría, cada uno con su propia dirección
+  geocodificada. `MapSettings` (fila única): centro de las 2 líneas que
+  dividen el mapa en 4 cuadrantes visuales, movible arrastrando un pin en
+  el mapa (no es el centro geográfico fijo de la ciudad). Mapa nuevo
+  (`apps/web/app/equipos/MapaVoluntariosMap.tsx`, mismo patrón Leaflet que
+  `CasosMap.tsx`) con 3 capas: voluntarios (círculos azules), puntos de
+  operación (color por categoría) y el pin arrastrable del cruce. Todo
+  backend va en el mismo módulo `field-ops.routes.ts` (mismo permiso que
+  el resto de Operaciones de Campo) — migración
+  `20261107150000_fase_x_mapa_voluntarios` aplicada a mano (workaround de
+  siempre, ver abajo). Solo visualización por ahora, no se integra con
+  asignación de casos/equipos todavía. Pendiente: la pestaña "Actividad"
+  de usuarios (`DETAIL_LABEL` en `Usuarios.tsx`) todavía no tiene las
+  traducciones al español para `operational_point`/`map_settings`/
+  `map_volunteers` — no se tocó ese archivo en esta fase porque la copia
+  local del repo estaba desactualizada respecto de lo ya desplegado en
+  producción (ver nota de riesgo más abajo) y no valía la pena arriesgar
+  pisar ese trabajo sin antes traerlo de vuelta del servidor.
+- **Fase W (28/10/2026)**: clave de reintento (`Case.clientSubmissionId`,
+  único) para evitar casos duplicados cuando se pierde la respuesta de
+  `POST /cases` en el campo (mala señal + sesión que vence a mitad de un
+  relevamiento largo de 20-30 min). Aplicado en schema/backend/frontend.
 - **Milestone 0**: diseño de arquitectura + scaffolding del monorepo. Sin
   código de negocio.
 - **Milestone 1**: Core & Seguridad. Auth + RBAC probados de punta a punta

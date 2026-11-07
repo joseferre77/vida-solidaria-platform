@@ -9,8 +9,9 @@ import { Presentismo } from "./tabs/Presentismo"
 import { Checkins } from "./tabs/Checkins"
 import { Cocina } from "./tabs/Cocina"
 import { Stock } from "./tabs/Stock"
+import { Mapa } from "./tabs/Mapa"
 
-type TabKey = "equipos" | "zonas" | "presentismo" | "checkins" | "cocina" | "stock"
+type TabKey = "equipos" | "zonas" | "presentismo" | "checkins" | "mapa" | "cocina" | "stock"
 
 /**
  * Fase I — "Equipos y Secciones": equipos de campo, zonas con asignación
@@ -19,7 +20,7 @@ type TabKey = "equipos" | "zonas" | "presentismo" | "checkins" | "cocina" | "sto
  * /administracion: permiso field_ops.* para las primeras tres,
  * logistics.* para Cocina.
  */
-const TAB_KEYS: TabKey[] = ["equipos", "zonas", "presentismo", "checkins", "cocina", "stock"]
+const TAB_KEYS: TabKey[] = ["equipos", "zonas", "presentismo", "checkins", "mapa", "cocina", "stock"]
 
 export default function EquiposPage() {
   const router = useRouter()
@@ -62,6 +63,7 @@ export default function EquiposPage() {
     { key: "zonas", label: "Zonas", visible: canFieldOps },
     { key: "presentismo", label: "Presentismo", visible: canFieldOps },
     { key: "checkins", label: "Check-ins", visible: canFieldOps },
+    { key: "mapa", label: "Mapa", visible: canFieldOps },
     { key: "cocina", label: "Cocina", visible: canLogistics },
     { key: "stock", label: "Stock", visible: canLogistics },
   ].filter((t) => t.visible) as { key: TabKey; label: string; visible: boolean }[]
@@ -95,6 +97,7 @@ export default function EquiposPage() {
       {currentTab === "zonas" && <Zonas />}
       {currentTab === "presentismo" && <Presentismo />}
       {currentTab === "checkins" && <Checkins />}
+      {currentTab === "mapa" && <Mapa />}
       {currentTab === "cocina" && <Cocina />}
       {currentTab === "stock" && <Stock />}
     </main>

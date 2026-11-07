@@ -31,12 +31,26 @@
  * No se integra Socket.IO todavía (mencionado como pendiente en
  * server.ts) — queda para cuando se necesite ver check-ins en vivo en un
  * mapa; por ahora la lista se refresca por polling desde el frontend.
+ *
+ * Fase X (07/11/2026) — Mapa de voluntarios: agrega al mismo módulo (mismo
+ * permiso field_ops.read/write) un mapa de solo visualización con dos
+ * capas de pines: voluntarios geolocalizados (`User.lat/lng`, completados
+ * geocodificando `User.address` vía Nominatim/OSM — ver lib/geocoding.ts)
+ * y "puntos de operación" (`OperationalPoint`: acopio de ropa, cocina,
+ * recepción de comida, distribución de ropa, feria física, punto de
+ * encuentro, retiro de ropa — categorías abiertas, puede haber varios de
+ * cada una, a diferencia del punto de encuentro fijo de presentismo de
+ * arriba). `MapSettings` guarda el punto donde se cruzan las dos líneas
+ * que dividen el mapa en 4 cuadrantes visuales — Josecito lo mueve
+ * arrastrando un pin en el mapa, no es el centro geográfico fijo de la
+ * ciudad. Todavía no se integra con asignación de casos/equipos.
  */
 import type { FastifyInstance } from "fastify"
 import { z } from "zod"
 import { prisma } from "../../lib/prisma"
 import { requireAuth, requirePermission } from "../../middleware/auth.middleware"
 import { logActivity } from "../../lib/audit"
+import { geocodeAddress } from "../../lib/geocoding"
 
 const teamSchema = z.object({
   name: z.string().min(2, "El nombre es obligatorio"),
@@ -93,6 +107,41 @@ const checkinSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   deliveries: z.array(z.object({ itemLabel: z.string().min(1), quantity: z.number().positive() })).optional(),
+})
+
+// ── Fase X: Mapa de voluntarios ──
+const OPERATIONAL_POINT_CATEGORIES = [
+  "acopio_ropa",
+  "cocina",
+  "recepcion_comida",
+  "distribucion_ropa",
+  "feria",
+  "punto_encuentro",
+  "retiro_ropa",
+  "otro",
+] as const
+
+const operationalPointSchema = z.object({
+  category: z.enum(OPERATIONAL_POINT_CATEGORIES),
+  name: z.string().min(2, "El nombre es obligatorio"),
+  address: z.string().trim().optional(),
+  // Si no vienen, se geocodifica `address` — pensado para cuando el
+  // admin arrastra el pin a mano en vez de tipear una dirección exacta.
+  lat: z.number().optional(),
+  lng: z.number().optional(),
+  active: z.boolean().optional(),
+})
+
+const mapSettingsSchema = z.object({
+  centerLat: z.number(),
+  centerLng: z.number(),
+})
+
+const geocodeVolunteersSchema = z.object({
+  // Por default solo geocodifica a quien todavía no tiene lat/lng — con
+  // force:true re-geocodifica a todos los que tengan dirección cargada
+  // (ej. si alguien corrigió su dirección y hace falta recalcular).
+  force: z.boolean().optional(),
 })
 
 /** Trae {id,name,email} para un set de userIds sueltos (sin relación Prisma). */
@@ -432,4 +481,188 @@ export async function fieldOpsRoutes(app: FastifyInstance) {
       deliveries: checkin.deliveries.map((d) => ({ itemLabel: d.itemLabel, quantity: d.quantity })),
     })
   })
+
+  // ── Mapa de voluntarios (Fase X) ──
+  // Configuración del cruce de las 4 líneas de cuadrante.
+  app.get("/map/settings", { preHandler: [requireAuth, requirePermission("field_ops.read")] }, async () => {
+    const settings = await prisma.mapSettings.findUnique({ where: { id: "default" } })
+    // No debería pasar (la migración inserta la fila inicial), pero por si
+    // alguna vez se borra a mano, devuelve un default sensato en vez de 404.
+    return settings ?? { id: "default", centerLat: -38.0055, centerLng: -57.5426, updatedBy: null, updatedAt: null }
+  })
+
+  app.patch(
+    "/map/settings",
+    { preHandler: [requireAuth, requirePermission("field_ops.write")] },
+    async (request) => {
+      const body = mapSettingsSchema.parse(request.body)
+      const settings = await prisma.mapSettings.upsert({
+        where: { id: "default" },
+        update: { centerLat: body.centerLat, centerLng: body.centerLng, updatedBy: request.user!.sub },
+        create: { id: "default", centerLat: body.centerLat, centerLng: body.centerLng, updatedBy: request.user!.sub },
+      })
+      await logActivity(request.user!.sub, "map_settings", "default", "updated", body)
+      return settings
+    },
+  )
+
+  // Voluntarios ya geocodificados (para pintar en el mapa) + contadores
+  // para que el frontend muestre "12 de 15 ubicados" y el botón de
+  // geocodificar tenga sentido.
+  app.get("/map/volunteers", { preHandler: [requireAuth, requirePermission("field_ops.read")] }, async () => {
+    const [items, totalWithAddress, totalUsers] = await Promise.all([
+      prisma.user.findMany({
+        where: { status: "active", lat: { not: null }, lng: { not: null } },
+        select: { id: true, name: true, email: true, address: true, lat: true, lng: true, geocodedAt: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.user.count({ where: { status: "active", address: { not: null }, NOT: { address: "" } } }),
+      prisma.user.count({ where: { status: "active" } }),
+    ])
+    return { items, stats: { geocoded: items.length, totalWithAddress, totalUsers } }
+  })
+
+  // Geocodifica en lote las direcciones de usuarios activos. Secuencial
+  // (respeta el límite de Nominatim de 1 req/seg vía lib/geocoding.ts) — con
+  // pocos usuarios reales (~14 coordinadores) tarda unos segundos; si el
+  // lote fuera grande algún día y el request tardara demasiado, un segundo
+  // click retoma donde quedó (solo reintenta los que sigan sin lat/lng).
+  app.post(
+    "/map/volunteers/geocode",
+    { preHandler: [requireAuth, requirePermission("field_ops.write")] },
+    async (request) => {
+      const { force } = geocodeVolunteersSchema.parse(request.body ?? {})
+      const candidates = await prisma.user.findMany({
+        where: {
+          status: "active",
+          address: { not: null },
+          NOT: { address: "" },
+          ...(force ? {} : { lat: null }),
+        },
+        select: { id: true, address: true },
+      })
+      let geocoded = 0
+      let failed = 0
+      for (const u of candidates) {
+        const geo = await geocodeAddress(u.address)
+        if (geo) {
+          await prisma.user.update({ where: { id: u.id }, data: { lat: geo.lat, lng: geo.lng, geocodedAt: new Date() } })
+          geocoded++
+        } else {
+          failed++
+        }
+      }
+      await logActivity(request.user!.sub, "map_volunteers", "batch", "geocoded", {
+        attempted: candidates.length,
+        geocoded,
+        failed,
+      })
+      return { attempted: candidates.length, geocoded, failed }
+    },
+  )
+
+  // ── Puntos de operación (Fase X) ──
+  app.get(
+    "/operational-points",
+    { preHandler: [requireAuth, requirePermission("field_ops.read")] },
+    async () => {
+      const points = await prisma.operationalPoint.findMany({ orderBy: [{ category: "asc" }, { name: "asc" }] })
+      const users = await userMapFor(points.map((p) => p.createdBy))
+      return points.map((p) => ({ ...p, createdByUser: users.get(p.createdBy) ?? null }))
+    },
+  )
+
+  app.post(
+    "/operational-points",
+    { preHandler: [requireAuth, requirePermission("field_ops.write")] },
+    async (request, reply) => {
+      const body = operationalPointSchema.parse(request.body)
+      let lat = body.lat
+      let lng = body.lng
+      let geocodedAt: Date | null = null
+      if (lat === undefined || lng === undefined) {
+        const geo = await geocodeAddress(body.address)
+        if (!geo) {
+          return reply.code(400).send({
+            error: "No pudimos ubicar esa dirección en el mapa. Probá con una más precisa, o agregá el punto y arrastrá el pin a mano.",
+          })
+        }
+        lat = geo.lat
+        lng = geo.lng
+        geocodedAt = new Date()
+      }
+      const point = await prisma.operationalPoint.create({
+        data: {
+          category: body.category,
+          name: body.name,
+          address: body.address || null,
+          lat,
+          lng,
+          geocodedAt,
+          active: body.active ?? true,
+          createdBy: request.user!.sub,
+        },
+      })
+      await logActivity(request.user!.sub, "operational_point", point.id, "created", body)
+      return reply.code(201).send({ ...point, createdByUser: null })
+    },
+  )
+
+  app.patch(
+    "/operational-points/:id",
+    { preHandler: [requireAuth, requirePermission("field_ops.write")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const body = operationalPointSchema.partial().parse(request.body)
+      const existing = await prisma.operationalPoint.findUnique({ where: { id } })
+      if (!existing) return reply.code(404).send({ error: "Punto no encontrado" })
+
+      let lat = body.lat
+      let lng = body.lng
+      let geocodedAt = existing.geocodedAt
+      const addressChanged = body.address !== undefined && body.address !== existing.address
+      if (lat !== undefined || lng !== undefined) {
+        // Coordenadas puestas a mano (arrastrando el pin) — no se
+        // re-geocodifica, se respeta la posición elegida.
+        lat = lat ?? existing.lat
+        lng = lng ?? existing.lng
+      } else if (addressChanged) {
+        const geo = await geocodeAddress(body.address)
+        if (!geo) {
+          return reply.code(400).send({
+            error: "No pudimos ubicar esa dirección en el mapa. Probá con una más precisa, o arrastrá el pin a mano.",
+          })
+        }
+        lat = geo.lat
+        lng = geo.lng
+        geocodedAt = new Date()
+      }
+
+      const point = await prisma.operationalPoint.update({
+        where: { id },
+        data: {
+          category: body.category,
+          name: body.name,
+          address: body.address === undefined ? undefined : body.address || null,
+          lat,
+          lng,
+          geocodedAt,
+          active: body.active,
+        },
+      })
+      await logActivity(request.user!.sub, "operational_point", id, "updated", body)
+      return point
+    },
+  )
+
+  app.delete(
+    "/operational-points/:id",
+    { preHandler: [requireAuth, requirePermission("field_ops.write")] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      await prisma.operationalPoint.delete({ where: { id } })
+      await logActivity(request.user!.sub, "operational_point", id, "deleted")
+      return reply.code(204).send()
+    },
+  )
 }

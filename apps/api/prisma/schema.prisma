@@ -63,6 +63,14 @@ model User {
   cvUrl          String?   @map("cv_url") // sube por POST /uploads, mismo mecanismo que avatarUrl
   availableDays  String[]  @default([]) @map("available_days") // "lun".."dom"
   availableHours String?   @map("available_hours") // texto libre — ej. "mañanas", "9 a 13hs"
+  // Fase X — mapa de voluntarios: coordenadas resultantes de geocodificar
+  // `address` (gratis, vía Nominatim/OpenStreetMap). Null hasta la primera
+  // corrida de geocodificación, o si la dirección está vacía/no se pudo
+  // resolver. `geocodedAt` sirve para saber si hay que re-geocodificar
+  // (ej. la persona cambió su dirección después de la última corrida).
+  lat         Float?
+  lng         Float?
+  geocodedAt  DateTime? @map("geocoded_at")
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
@@ -821,6 +829,19 @@ model Case {
   // llegó a existir un Case. Opcional porque los casos ya cargados antes
   // de este bloque no lo tienen.
   surveyStartedAt DateTime?        @map("survey_started_at")
+  // Fase W — clave de reintento: el frontend genera un UUID una sola vez al
+  // empezar a cargar un caso nuevo (lo reutiliza si el guardado da error de
+  // red y el voluntario vuelve a tocar "Guardar", y recién genera uno
+  // distinto al arrancar OTRO caso con "+ Cargar otro caso"). POST /cases
+  // revisa esto antes de crear nada: si ya existe un caso con esta clave
+  // para el mismo usuario, devuelve ESE caso en vez de crear uno nuevo. Sin
+  // esto, una respuesta perdida en el camino (típico con mala señal en la
+  // calle) hacía que el reintento automático de sesión vencida, o el propio
+  // voluntario reintentando a mano tras ver "no se pudo guardar", generara
+  // un caso duplicado — el primer intento SÍ se había guardado, solo que la
+  // respuesta nunca llegó al navegador. Nullable porque los casos cargados
+  // antes de este cambio no lo tienen.
+  clientSubmissionId String?          @unique @map("client_submission_id")
 
   contactsHistory CaseContactHistory[]
   locations       CaseLocation[]
@@ -1336,6 +1357,61 @@ model FieldDelivery {
   checkin Checkin @relation(fields: [checkinId], references: [id], onDelete: Cascade)
 
   @@map("field_deliveries")
+}
+
+// Fase X — Mapa de voluntarios (pedido de Josecito 07/11/2026): un mapa de
+// Mar del Plata con un pin por voluntario geolocalizado (vía `User.lat/lng`,
+// completados por geocodificación automática de `User.address`) y un pin
+// por cada "punto de operación" (lugares que la ONG usa en su día a día:
+// centro de acopio de ropa, cocina, recepción de comida, distribución de
+// ropa, ferias físicas, punto de encuentro del domingo, retiro de ropa en
+// algún lugar particular — puede haber varios de cada categoría, a
+// diferencia del punto de encuentro fijo que ya existía para presentismo).
+// Primera versión: solo visualización (no se integra todavía con
+// asignación de casos/equipos) — permiso field_ops.read/write, igual que
+// el resto de Operaciones de Campo.
+enum OperationalPointCategory {
+  acopio_ropa
+  cocina
+  recepcion_comida
+  distribucion_ropa
+  feria
+  punto_encuentro
+  retiro_ropa
+  otro
+}
+
+model OperationalPoint {
+  id         String                    @id @default(uuid())
+  category   OperationalPointCategory
+  name       String
+  address    String?
+  lat        Float
+  lng        Float
+  // Si vino de geocodificar `address` (gratis, Nominatim) vs. si alguien
+  // tocó/arrastró el pin a mano en el mapa y por eso tiene coordenadas
+  // propias que no hay que pisar en una re-geocodificación masiva.
+  geocodedAt DateTime?                 @map("geocoded_at")
+  active     Boolean                   @default(true)
+  createdBy  String                    @map("created_by")
+  createdAt  DateTime                  @default(now()) @map("created_at")
+  updatedAt  DateTime                  @updatedAt @map("updated_at")
+
+  @@map("operational_points")
+}
+
+// Fila única (singleton, id fijo "default") con el punto donde se cruzan
+// las dos líneas que dividen el mapa en 4 cuadrantes visuales — pedido
+// explícito de Josecito de que sea un punto que se pueda mover (arrastrando
+// el pin en el mapa), no fijo en el centro geográfico de la ciudad.
+model MapSettings {
+  id         String   @id @default("default")
+  centerLat  Float    @map("center_lat")
+  centerLng  Float    @map("center_lng")
+  updatedBy  String?  @map("updated_by")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("map_settings")
 }
 
 // ────────────────────────────────────────────────
